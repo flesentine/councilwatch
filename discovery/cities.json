@@ -1,0 +1,88 @@
+[
+  {
+    "slug": "rsm",
+    "name": "Rancho Santa Margarita",
+    "timezone": "America/Los_Angeles",
+    "adapter": "granicus",
+    "source_url": "https://cityofrsm.granicus.com/ViewPublisher.php?view_id=2",
+    "meeting_terms": [
+      "city council",
+      "planning commission"
+    ],
+    "exclude_terms": []
+  },
+  {
+    "slug": "aliso-viejo",
+    "name": "Aliso Viejo",
+    "timezone": "America/Los_Angeles",
+    "adapter": "granicus",
+    "source_url": "https://alisoviejoca.granicus.com/ViewPublisher.php?view_id=3",
+    "meeting_terms": [
+      "city council"
+    ],
+    "exclude_terms": [
+      "committee",
+      "legislative subcommittee"
+    ]
+  },
+  {
+    "slug": "mission-viejo",
+    "name": "Mission Viejo",
+    "timezone": "America/Los_Angeles",
+    "adapter": "mission_viejo",
+    "source_url": "https://missionviejo.granicus.com/ViewPublisher.php?view_id=25",
+    "meeting_terms": [
+      "city council"
+    ],
+    "exclude_terms": [],
+    "agenda_index": "https://dms.missionviejo.gov/OnBaseAgendaOnline/",
+    "upcoming_url": "https://www.missionviejo.gov/event-category/meetings-council",
+    "additional_granicus_sources": [
+      {
+        "source_url": "https://missionviejo.granicus.com/ViewPublisher.php?view_id=14",
+        "meeting_terms": [
+          "planning and transportation commission"
+        ],
+        "exclude_terms": []
+      }
+    ]
+  },
+  {
+    "slug": "lake-forest",
+    "name": "Lake Forest",
+    "timezone": "America/Los_Angeles",
+    "adapter": "youtube_latest",
+    "source_url": "https://www.lakeforestca.gov/city_government/agendas_and_minutes/index.php",
+    "youtube_url": "https://www.youtube.com/@CityofLakeForestCA1991/streams",
+    "agenda_index": "https://www.lakeforestca.gov/city_government/agendas_and_minutes/index.php",
+    "upcoming_url": "https://publiccomment.lakeforestca.gov/",
+    "meeting_terms": [
+      "city council",
+      "meeting of the city council",
+      "planning commission"
+    ],
+    "regular_schedule": {
+      "weekday": 1,
+      "weeks": [
+        1,
+        3
+      ],
+      "title": "Lake Forest Regular Meeting of the City Council"
+    }
+  },
+  {
+    "slug": "laguna-niguel",
+    "name": "Laguna Niguel",
+    "timezone": "America/Los_Angeles",
+    "adapter": "civicengage",
+    "source_url": "https://www.cityoflagunaniguel.org/AgendaCenter",
+    "youtube_url": "https://www.youtube.com/cityoflagunaniguel/streams",
+    "meeting_terms": [
+      "city council",
+      "planning commission"
+    ],
+    "recording_terms": [
+      "city council"
+    ]
+  }
+]

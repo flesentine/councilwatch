@@ -42,3 +42,11 @@ backups/
 
 # Runtime state
 status.json
+
+# Discovery runtime/generated files
+discovery/data/
+discovery/logs/
+discovery/__pycache__/
+discovery/**/__pycache__/
+discovery/*.bak*
+discovery/**/*.bak*
