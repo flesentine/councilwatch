@@ -695,15 +695,22 @@ Return ONLY JSON:
         # the candidate as a place AND the observed form looks
         # structurally like a street. This prevents arbitrary
         # places from fuzzy-matching unrelated road names.
-        if entity_type == "street":
+        if entity_type in {"street", "place"}:
             from street_registry import (
                 looks_like_street,
                 match_street,
+                street_name_part,
                 source_url as street_source_url,
             )
 
             if looks_like_street(observed):
-                street_match = match_street(observed)
+                street_candidate = street_name_part(
+                    observed
+                )
+
+                street_match = match_street(
+                    street_candidate
+                )
 
                 if street_match:
                     canonical = street_match[
@@ -738,7 +745,7 @@ Return ONLY JSON:
                         {
                             "observed_text": observed,
                             "canonical_text": canonical,
-                            "entity_type": "place",
+                            "entity_type": "street",
                             "status": status,
                             "confidence": confidence,
                             "evidence": evidence,

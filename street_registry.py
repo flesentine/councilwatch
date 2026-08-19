@@ -73,6 +73,27 @@ def base_without_type(text: str) -> str:
     return " ".join(words)
 
 
+def street_name_part(text: str) -> str:
+    """
+    Remove a leading house/address number before matching the
+    street-name component.
+
+    Examples:
+        26200 Enterprise Way -> Enterprise Way
+        123A Main Street -> Main Street
+
+    The address number itself is NOT verified by the street
+    registry.
+    """
+    text = str(text or "").strip()
+
+    return re.sub(
+        r"^\s*\d{1,6}[A-Za-z]?(?:-\d+)?\s+",
+        "",
+        text,
+    ).strip()
+
+
 def looks_like_street(text: str) -> bool:
     """
     Conservative gate used before applying street verification
@@ -82,6 +103,7 @@ def looks_like_street(text: str) -> bool:
     businesses, neighborhoods, etc. as streets merely because
     a similarly named road exists somewhere in Orange County.
     """
+    text = street_name_part(text)
     words = normalize(text).split()
 
     if not words:
@@ -151,8 +173,10 @@ def match_street(
     text: str,
     *,
     fuzzy_threshold: float = 0.90,
-    minimum_margin: float = 0.05,
+    minimum_margin: float = 0.08,
 ):
+    original_text = text
+    text = street_name_part(text)
     query = normalize(text)
 
     if not query:
@@ -175,7 +199,7 @@ def match_street(
         item = next(iter(canonical_exact.values()))
 
         return {
-            "observed_text": text,
+            "observed_text": original_text,
             "canonical_text": item["row"]["canonical"],
             "status": "VERIFIED",
             "confidence": "high",
@@ -206,7 +230,7 @@ def match_street(
         )
 
         return {
-            "observed_text": text,
+            "observed_text": original_text,
             "canonical_text": canonical,
             "status": (
                 "VERIFIED"
@@ -249,7 +273,7 @@ def match_street(
             item = next(iter(matches.values()))
 
             return {
-                "observed_text": text,
+                "observed_text": original_text,
                 "canonical_text":
                     item["row"]["canonical"],
                 "status": "CORRECTED",
@@ -303,7 +327,7 @@ def match_street(
         return None
 
     return {
-        "observed_text": text,
+        "observed_text": original_text,
         "canonical_text": best["row"]["canonical"],
         "status": "CORRECTED",
         "confidence": "high",
