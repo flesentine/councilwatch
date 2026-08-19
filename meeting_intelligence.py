@@ -500,6 +500,11 @@ could reasonably appear in a news article:
 - technologies
 - government bodies
 
+ENTITY TYPE RULE:
+Named roads, streets, parkways, highways, avenues, drives,
+lanes, ways and other roadway names MUST use entity_type
+"street", not "place".
+
 STRICT RULES:
 
 1. VERIFIED means the canonical spelling/identity is
@@ -564,7 +569,7 @@ Return ONLY JSON:
     {{
       "observed_text": "form found in notes",
       "canonical_text": "safest supported form",
-      "entity_type": "person|place|organization|program|project|business|government_body|technology|other",
+      "entity_type": "person|street|place|organization|program|project|business|government_body|technology|other",
       "status": "VERIFIED|CORRECTED|UNVERIFIED",
       "confidence": "high|medium|low",
       "evidence": "brief explanation",
@@ -671,12 +676,80 @@ Return ONLY JSON:
             )
         ).strip()
 
+        entity_type = str(
+            entity.get(
+                "entity_type",
+                "other",
+            )
+        ).strip().lower()
+
         if status not in {
             "VERIFIED",
             "CORRECTED",
             "UNVERIFIED",
         }:
             status = "UNVERIFIED"
+
+        # Orange County GIS is authoritative for canonical
+        # street spelling. Only apply it when Gemini identified
+        # the candidate as a place AND the observed form looks
+        # structurally like a street. This prevents arbitrary
+        # places from fuzzy-matching unrelated road names.
+        if entity_type == "street":
+            from street_registry import (
+                looks_like_street,
+                match_street,
+                source_url as street_source_url,
+            )
+
+            if looks_like_street(observed):
+                street_match = match_street(observed)
+
+                if street_match:
+                    canonical = street_match[
+                        "canonical_text"
+                    ]
+                    status = street_match["status"]
+                    confidence = street_match[
+                        "confidence"
+                    ]
+
+                    match_type = street_match.get(
+                        "match_type",
+                        "registry",
+                    )
+
+                    if status == "CORRECTED":
+                        evidence = (
+                            "Orange County GIS street "
+                            "centerline registry resolved the "
+                            f"recording-derived form to "
+                            f"{canonical} "
+                            f"({match_type})."
+                        )
+                    else:
+                        evidence = (
+                            "Exact canonical street name "
+                            "confirmed by the Orange County "
+                            "GIS street centerline registry."
+                        )
+
+                    cleaned.append(
+                        {
+                            "observed_text": observed,
+                            "canonical_text": canonical,
+                            "entity_type": "place",
+                            "status": status,
+                            "confidence": confidence,
+                            "evidence": evidence,
+                            "official_source_url":
+                                street_source_url(),
+                            "verification_source":
+                                "orange_county_street_registry",
+                        }
+                    )
+
+                    continue
 
         # Deterministic safety guard:
         # VERIFIED/CORRECTED must actually have the
@@ -747,12 +820,7 @@ Return ONLY JSON:
             {
                 "observed_text": observed,
                 "canonical_text": canonical,
-                "entity_type": str(
-                    entity.get(
-                        "entity_type",
-                        "other",
-                    )
-                ).strip(),
+                "entity_type": entity_type,
                 "status": status,
                 "confidence": confidence,
                 "evidence": evidence,
