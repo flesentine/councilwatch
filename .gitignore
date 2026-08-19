@@ -1,0 +1,44 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets / local environment
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Runtime / generated meeting material
+drafts/
+work/
+logs/
+*.log
+
+# Databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Local backups / scratch copies
+backups/
+*.bak
+*.bak-*
+*.before-*
+*~
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Test/cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state
+status.json

@@ -1,0 +1,835 @@
+{
+  "schema_version": 1,
+  "ambiguous_aliases": [
+    "OCSD",
+    "CEO",
+    "MET",
+    "HCA",
+    "DPR",
+    "DOF",
+    "Council"
+  ],
+  "entities": [
+    {
+      "canonical": "County of Orange",
+      "aliases": [
+        "Orange County",
+        "County of Orange"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "government"
+    },
+    {
+      "canonical": "Orange County Board of Supervisors",
+      "aliases": [
+        "Board of Supervisors",
+        "OC Board of Supervisors",
+        "OC BOS"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "government_body"
+    },
+    {
+      "canonical": "County Executive Office",
+      "aliases": [
+        "County Executive Office",
+        "OC County Executive Office",
+        "CEO"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "OC Public Works",
+      "aliases": [
+        "OC Public Works",
+        "OCPW",
+        "Orange County Public Works"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "OC Development Services",
+      "aliases": [
+        "OC Development Services",
+        "Orange County Development Services"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "OC Environmental Resources",
+      "aliases": [
+        "OC Environmental Resources",
+        "Orange County Environmental Resources"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "Orange County Flood Control District",
+      "aliases": [
+        "Orange County Flood Control District",
+        "OC Flood Control District",
+        "OCFCD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "special_district"
+    },
+    {
+      "canonical": "OC Community Resources",
+      "aliases": [
+        "OC Community Resources",
+        "OCCR",
+        "Orange County Community Resources"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "OC Parks",
+      "aliases": [
+        "OC Parks",
+        "Orange County Parks"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "OC Waste & Recycling",
+      "aliases": [
+        "OC Waste and Recycling",
+        "OC Waste & Recycling",
+        "OCWR"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "Orange County Health Care Agency",
+      "aliases": [
+        "Orange County Health Care Agency",
+        "OC Health Care Agency",
+        "OC HCA",
+        "HCA"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "Orange County Sheriff's Department",
+      "aliases": [
+        "Orange County Sheriff's Department",
+        "Orange County Sheriff",
+        "OC Sheriff",
+        "OCSheriff"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "law_enforcement"
+    },
+    {
+      "canonical": "Orange County District Attorney",
+      "aliases": [
+        "Orange County District Attorney",
+        "OC District Attorney",
+        "OCDA"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "Orange County Registrar of Voters",
+      "aliases": [
+        "Orange County Registrar of Voters",
+        "Registrar of Voters",
+        "OC Registrar of Voters",
+        "ROV"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "Orange County Clerk-Recorder",
+      "aliases": [
+        "Orange County Clerk-Recorder",
+        "OC Clerk Recorder",
+        "Clerk-Recorder"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "Orange County Treasurer-Tax Collector",
+      "aliases": [
+        "Orange County Treasurer-Tax Collector",
+        "Treasurer-Tax Collector"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "department"
+    },
+    {
+      "canonical": "John Wayne Airport",
+      "aliases": [
+        "John Wayne Airport",
+        "JWA",
+        "Orange County Airport"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "public_facility"
+    },
+    {
+      "canonical": "Orange County Department of Education",
+      "aliases": [
+        "Orange County Department of Education",
+        "OCDE"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "education"
+    },
+    {
+      "canonical": "Orange County Fire Authority",
+      "aliases": [
+        "Orange County Fire Authority",
+        "OC Fire Authority",
+        "OCFA"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "public_safety"
+    },
+    {
+      "canonical": "Orange County Transportation Authority",
+      "aliases": [
+        "Orange County Transportation Authority",
+        "OC Transportation Authority",
+        "OCTA"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "transportation"
+    },
+    {
+      "canonical": "Transportation Corridor Agencies",
+      "aliases": [
+        "Transportation Corridor Agencies",
+        "TCA",
+        "The Toll Roads",
+        "Toll Roads"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "transportation"
+    },
+    {
+      "canonical": "Orange County Local Agency Formation Commission",
+      "aliases": [
+        "Orange County Local Agency Formation Commission",
+        "OC LAFCO",
+        "OCLAFCO",
+        "LAFCO"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "regional_agency"
+    },
+    {
+      "canonical": "Orange County Council of Governments",
+      "aliases": [
+        "Orange County Council of Governments",
+        "OCCOG"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "regional_agency"
+    },
+    {
+      "canonical": "Southern California Association of Governments",
+      "aliases": [
+        "Southern California Association of Governments",
+        "SCAG"
+      ],
+      "jurisdiction": "regional",
+      "type": "regional_agency"
+    },
+    {
+      "canonical": "South Coast Air Quality Management District",
+      "aliases": [
+        "South Coast Air Quality Management District",
+        "South Coast AQMD",
+        "SCAQMD",
+        "AQMD",
+        "Air Quality Management District"
+      ],
+      "jurisdiction": "regional",
+      "type": "air_quality"
+    },
+    {
+      "canonical": "Orange County Power Authority",
+      "aliases": [
+        "Orange County Power Authority",
+        "OCPA"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "energy"
+    },
+    {
+      "canonical": "Municipal Water District of Orange County",
+      "aliases": [
+        "Municipal Water District of Orange County",
+        "MWDOC"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "Metropolitan Water District of Southern California",
+      "aliases": [
+        "Metropolitan Water District of Southern California",
+        "Metropolitan Water District",
+        "Metropolitan",
+        "MWD",
+        "MET"
+      ],
+      "jurisdiction": "regional",
+      "type": "water"
+    },
+    {
+      "canonical": "Orange County Water District",
+      "aliases": [
+        "Orange County Water District",
+        "OCWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "Orange County Sanitation District",
+      "aliases": [
+        "Orange County Sanitation District",
+        "OC San"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "wastewater"
+    },
+    {
+      "canonical": "South Orange County Wastewater Authority",
+      "aliases": [
+        "South Orange County Wastewater Authority",
+        "SOCWA"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "wastewater"
+    },
+    {
+      "canonical": "Moulton Niguel Water District",
+      "aliases": [
+        "Moulton Niguel Water District",
+        "MNWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "Santa Margarita Water District",
+      "aliases": [
+        "Santa Margarita Water District",
+        "SMWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "El Toro Water District",
+      "aliases": [
+        "El Toro Water District",
+        "ETWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "Irvine Ranch Water District",
+      "aliases": [
+        "Irvine Ranch Water District",
+        "IRWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "South Coast Water District",
+      "aliases": [
+        "South Coast Water District",
+        "SCWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "Trabuco Canyon Water District",
+      "aliases": [
+        "Trabuco Canyon Water District",
+        "TCWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "Laguna Beach County Water District",
+      "aliases": [
+        "Laguna Beach County Water District",
+        "LBCWD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "water"
+    },
+    {
+      "canonical": "California State Transportation Agency",
+      "aliases": [
+        "California State Transportation Agency",
+        "CalSTA"
+      ],
+      "jurisdiction": "california",
+      "type": "state_agency"
+    },
+    {
+      "canonical": "California Department of Transportation",
+      "aliases": [
+        "California Department of Transportation",
+        "Caltrans",
+        "Cal Trans",
+        "Cal-Trans"
+      ],
+      "jurisdiction": "california",
+      "type": "transportation"
+    },
+    {
+      "canonical": "Caltrans District 12",
+      "aliases": [
+        "Caltrans District 12",
+        "District 12",
+        "Caltrans D12",
+        "Cal Trans District 12",
+        "Cal-Trans District 12",
+        "Cal Trans D12"
+      ],
+      "jurisdiction": "california",
+      "type": "transportation"
+    },
+    {
+      "canonical": "California Transportation Commission",
+      "aliases": [
+        "California Transportation Commission",
+        "CTC"
+      ],
+      "jurisdiction": "california",
+      "type": "transportation"
+    },
+    {
+      "canonical": "California Highway Patrol",
+      "aliases": [
+        "California Highway Patrol",
+        "CHP"
+      ],
+      "jurisdiction": "california",
+      "type": "law_enforcement"
+    },
+    {
+      "canonical": "California Office of Traffic Safety",
+      "aliases": [
+        "California Office of Traffic Safety",
+        "Office of Traffic Safety",
+        "OTS"
+      ],
+      "jurisdiction": "california",
+      "type": "transportation"
+    },
+    {
+      "canonical": "California Department of Housing and Community Development",
+      "aliases": [
+        "California Department of Housing and Community Development",
+        "Housing and Community Development",
+        "HCD",
+        "California HCD"
+      ],
+      "jurisdiction": "california",
+      "type": "housing"
+    },
+    {
+      "canonical": "Governor's Office of Land Use and Climate Innovation",
+      "aliases": [
+        "Governor's Office of Land Use and Climate Innovation",
+        "Land Use and Climate Innovation",
+        "LCI",
+        "Governor's Office of Planning and Research",
+        "OPR"
+      ],
+      "jurisdiction": "california",
+      "type": "planning"
+    },
+    {
+      "canonical": "California Strategic Growth Council",
+      "aliases": [
+        "California Strategic Growth Council",
+        "Strategic Growth Council",
+        "SGC"
+      ],
+      "jurisdiction": "california",
+      "type": "planning"
+    },
+    {
+      "canonical": "California Department of Finance",
+      "aliases": [
+        "California Department of Finance",
+        "Department of Finance",
+        "DOF"
+      ],
+      "jurisdiction": "california",
+      "type": "state_agency"
+    },
+    {
+      "canonical": "California Environmental Protection Agency",
+      "aliases": [
+        "California Environmental Protection Agency",
+        "CalEPA"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "California Air Resources Board",
+      "aliases": [
+        "California Air Resources Board",
+        "CARB",
+        "Air Resources Board",
+        "ARB"
+      ],
+      "jurisdiction": "california",
+      "type": "air_quality"
+    },
+    {
+      "canonical": "State Water Resources Control Board",
+      "aliases": [
+        "State Water Resources Control Board",
+        "State Water Board",
+        "SWRCB"
+      ],
+      "jurisdiction": "california",
+      "type": "water"
+    },
+    {
+      "canonical": "Santa Ana Regional Water Quality Control Board",
+      "aliases": [
+        "Santa Ana Regional Water Quality Control Board",
+        "Santa Ana Regional Board",
+        "Region 8",
+        "RWQCB 8",
+        "Regional Water Board 8",
+        "Regional Water Board Eight",
+        "Regional Board 8",
+        "Regional Board Eight",
+        "Water Board Region 8",
+        "Water Board Region Eight",
+        "Regional Water Board Region 8"
+      ],
+      "jurisdiction": "california",
+      "type": "water"
+    },
+    {
+      "canonical": "San Diego Regional Water Quality Control Board",
+      "aliases": [
+        "San Diego Regional Water Quality Control Board",
+        "San Diego Regional Board",
+        "Region 9",
+        "RWQCB 9",
+        "Regional Water Board 9",
+        "Regional Water Board Nine",
+        "Regional Board 9",
+        "Regional Board Nine",
+        "Water Board Region 9",
+        "Water Board Region Nine",
+        "Regional Water Board Region 9"
+      ],
+      "jurisdiction": "california",
+      "type": "water"
+    },
+    {
+      "canonical": "Department of Toxic Substances Control",
+      "aliases": [
+        "Department of Toxic Substances Control",
+        "DTSC"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "CalRecycle",
+      "aliases": [
+        "California Department of Resources Recycling and Recovery",
+        "CalRecycle"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "California Department of Pesticide Regulation",
+      "aliases": [
+        "California Department of Pesticide Regulation",
+        "Department of Pesticide Regulation",
+        "DPR"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "Office of Environmental Health Hazard Assessment",
+      "aliases": [
+        "Office of Environmental Health Hazard Assessment",
+        "OEHHA"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "California Public Utilities Commission",
+      "aliases": [
+        "California Public Utilities Commission",
+        "Public Utilities Commission",
+        "CPUC"
+      ],
+      "jurisdiction": "california",
+      "type": "utilities"
+    },
+    {
+      "canonical": "California Energy Commission",
+      "aliases": [
+        "California Energy Commission",
+        "CEC"
+      ],
+      "jurisdiction": "california",
+      "type": "energy"
+    },
+    {
+      "canonical": "California Governor's Office of Emergency Services",
+      "aliases": [
+        "California Governor's Office of Emergency Services",
+        "Cal OES",
+        "California OES"
+      ],
+      "jurisdiction": "california",
+      "type": "emergency_management"
+    },
+    {
+      "canonical": "California Department of Forestry and Fire Protection",
+      "aliases": [
+        "California Department of Forestry and Fire Protection",
+        "CAL FIRE",
+        "Cal Fire"
+      ],
+      "jurisdiction": "california",
+      "type": "public_safety"
+    },
+    {
+      "canonical": "Office of the State Fire Marshal",
+      "aliases": [
+        "Office of the State Fire Marshal",
+        "State Fire Marshal",
+        "OSFM"
+      ],
+      "jurisdiction": "california",
+      "type": "public_safety"
+    },
+    {
+      "canonical": "California Coastal Commission",
+      "aliases": [
+        "California Coastal Commission",
+        "Coastal Commission",
+        "CCC"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "California Department of Fish and Wildlife",
+      "aliases": [
+        "California Department of Fish and Wildlife",
+        "Fish and Wildlife",
+        "CDFW"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "California Department of Water Resources",
+      "aliases": [
+        "California Department of Water Resources",
+        "Department of Water Resources",
+        "DWR"
+      ],
+      "jurisdiction": "california",
+      "type": "water"
+    },
+    {
+      "canonical": "California Department of Parks and Recreation",
+      "aliases": [
+        "California Department of Parks and Recreation",
+        "California State Parks",
+        "State Parks"
+      ],
+      "jurisdiction": "california",
+      "type": "parks"
+    },
+    {
+      "canonical": "California State Lands Commission",
+      "aliases": [
+        "California State Lands Commission",
+        "State Lands Commission",
+        "SLC"
+      ],
+      "jurisdiction": "california",
+      "type": "state_agency"
+    },
+    {
+      "canonical": "California Coastal Conservancy",
+      "aliases": [
+        "California Coastal Conservancy",
+        "State Coastal Conservancy",
+        "Coastal Conservancy"
+      ],
+      "jurisdiction": "california",
+      "type": "environment"
+    },
+    {
+      "canonical": "California Natural Resources Agency",
+      "aliases": [
+        "California Natural Resources Agency",
+        "Natural Resources Agency",
+        "CNRA"
+      ],
+      "jurisdiction": "california",
+      "type": "state_agency"
+    },
+    {
+      "canonical": "Saddleback Valley Unified School District",
+      "aliases": [
+        "Saddleback Valley Unified School District",
+        "Saddleback Valley USD",
+        "SVUSD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "education"
+    },
+    {
+      "canonical": "Capistrano Unified School District",
+      "aliases": [
+        "Capistrano Unified School District",
+        "Capistrano Unified",
+        "CUSD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "education"
+    },
+    {
+      "canonical": "South Orange County Community College District",
+      "aliases": [
+        "South Orange County Community College District",
+        "SOCCCD"
+      ],
+      "jurisdiction": "orange_county",
+      "type": "education"
+    },
+    {
+      "canonical": "City Council",
+      "aliases": [
+        "City Council",
+        "Council"
+      ],
+      "jurisdiction": "municipal",
+      "type": "government_body"
+    },
+    {
+      "canonical": "Planning Commission",
+      "aliases": [
+        "Planning Commission",
+        "Planning Commissioners"
+      ],
+      "jurisdiction": "municipal",
+      "type": "government_body"
+    },
+    {
+      "canonical": "City Manager's Office",
+      "aliases": [
+        "City Manager's Office",
+        "City Manager Office"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "City Clerk",
+      "aliases": [
+        "City Clerk",
+        "City Clerk's Office"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "City Attorney",
+      "aliases": [
+        "City Attorney",
+        "City Attorney's Office"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "Public Works Department",
+      "aliases": [
+        "Public Works Department",
+        "Public Works"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "Community Development Department",
+      "aliases": [
+        "Community Development Department",
+        "Community Development"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "Planning Division",
+      "aliases": [
+        "Planning Division"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "Building and Safety",
+      "aliases": [
+        "Building and Safety",
+        "Building & Safety"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "Code Enforcement",
+      "aliases": [
+        "Code Enforcement"
+      ],
+      "jurisdiction": "municipal",
+      "type": "department"
+    },
+    {
+      "canonical": "Community Facilities District",
+      "aliases": [
+        "Community Facilities District",
+        "CFD"
+      ],
+      "jurisdiction": "municipal",
+      "type": "district"
+    }
+  ]
+}
