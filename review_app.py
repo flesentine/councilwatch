@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from agenda import agenda_text
 from gemini_worker import StoryDraft, audit_story
+from meeting_intelligence import audit_verification_context
 from settings import DRAFTS, STATUS_FILE, CITY_NAMES
 
 
@@ -145,6 +146,11 @@ def load_draft_rows():
         try:
             data = read_json(p)
         except Exception:
+            continue
+
+        # drafts/ also contains intelligence/test/support JSON.
+        # Only story objects belong in the review queue.
+        if not isinstance(data, dict):
             continue
 
         if not is_current_draft(p, data):
@@ -1291,6 +1297,36 @@ def reaudit_story(
         encoding="utf-8"
     )
 
+    # Match the production processor's evidence boundary:
+    # source notes + deterministic identity/spelling context.
+    # Never feed coverage-plan/editorial reasoning into audit.
+    intelligence_path = DRAFTS / (
+        f"{slug}--{external_id}.intelligence.json"
+    )
+
+    intelligence = {}
+
+    if intelligence_path.exists():
+        try:
+            loaded = read_json(
+                intelligence_path
+            )
+
+            if isinstance(loaded, dict):
+                intelligence = loaded
+        except Exception:
+            intelligence = {}
+
+    audit_notes = notes
+
+    if intelligence:
+        audit_notes += (
+            "\n\n"
+            + audit_verification_context(
+                intelligence
+            )
+        )
+
     agenda = ""
 
     agenda_url = target.get(
@@ -1358,7 +1394,7 @@ def reaudit_story(
     try:
         audit = audit_story(
             meeting,
-            notes,
+            audit_notes,
             agenda,
             story,
         )
