@@ -6,12 +6,21 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 
 BASE = Path(__file__).resolve().parent
 PUBLISHED = BASE / "published"
+
+CITY_FILTERS = [
+    ("all", "All cities"),
+    ("rsm", "Rancho Santa Margarita"),
+    ("aliso-viejo", "Aliso Viejo"),
+    ("mission-viejo", "Mission Viejo"),
+    ("lake-forest", "Lake Forest"),
+    ("laguna-niguel", "Laguna Niguel"),
+]
 
 app = FastAPI(
     title="CouncilWatch Public Site"
@@ -57,6 +66,75 @@ header .wrap{
 
 main{
     padding:28px 0 60px;
+}
+
+.section-head{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:20px;
+    margin-bottom:18px;
+}
+
+.section-title{
+    margin:0;
+    font-size:26px;
+    line-height:1.1;
+}
+
+.story-count{
+    font-family:Arial,sans-serif;
+    color:#777168;
+    font-size:12px;
+    white-space:nowrap;
+}
+
+.filters{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin:0 0 14px;
+}
+
+.filter{
+    display:inline-block;
+    text-decoration:none;
+    font-family:Arial,sans-serif;
+    font-size:11px;
+    color:#5f5a52;
+    border:1px solid #c9c4ba;
+    border-radius:999px;
+    padding:7px 10px;
+    background:#fcfbf7;
+}
+
+.filter:hover{
+    border-color:#7d776d;
+}
+
+.filter.active{
+    color:#fff;
+    background:#1e1e1e;
+    border-color:#1e1e1e;
+}
+
+.about{
+    margin-top:44px;
+    padding-top:24px;
+    border-top:1px solid #bbb5aa;
+}
+
+.about h2{
+    margin:0 0 10px;
+    font-size:22px;
+}
+
+.about p{
+    max-width:720px;
+    margin:0;
+    font-size:16px;
+    line-height:1.55;
+    color:#4a4741;
 }
 
 .card{
@@ -297,6 +375,49 @@ def find_article(article_id):
     return None
 
 
+def filter_nav(active_slug):
+    links = []
+
+    for slug, label in CITY_FILTERS:
+        cls = (
+            "filter active"
+            if slug == active_slug
+            else "filter"
+        )
+
+        href = (
+            "/"
+            if slug == "all"
+            else f"/?city={slug}"
+        )
+
+        links.append(
+            f"""
+            <a class="{cls}"
+               href="{href}">
+              {esc(label)}
+            </a>
+            """
+        )
+
+    return "".join(links)
+
+
+def about_panel():
+    return """
+    <section class="about">
+      <h2>About CouncilWatch</h2>
+      <p>
+        CouncilWatch follows public meetings across five South
+        Orange County cities and turns official agendas,
+        recordings and meeting materials into concise local
+        government coverage. Reports are reviewed before
+        publication, with links back to official sources.
+      </p>
+    </section>
+    """
+
+
 def shell(
     content,
     title="CouncilWatch",
@@ -342,16 +463,69 @@ def shell(
     "/",
     response_class=HTMLResponse,
 )
-def home():
-    articles = load_articles()
+def home(
+    request: Request,
+):
+    all_articles = load_articles()
+
+    valid_slugs = {
+        slug
+        for slug, _ in CITY_FILTERS
+    }
+
+    selected = str(
+        request.query_params.get(
+            "city",
+            "all",
+        )
+    ).strip()
+
+    if selected not in valid_slugs:
+        selected = "all"
+
+    if selected == "all":
+        articles = all_articles
+    else:
+        articles = [
+            article
+            for article in all_articles
+            if article.get(
+                "city_slug"
+            ) == selected
+        ]
+
+    count_label = (
+        "1 published report"
+        if len(articles) == 1
+        else f"{len(articles)} published reports"
+    )
+
+    top = f"""
+    <div class="section-head">
+      <h1 class="section-title">
+        Latest coverage
+      </h1>
+
+      <div class="story-count">
+        {esc(count_label)}
+      </div>
+    </div>
+
+    <nav class="filters"
+         aria-label="Filter stories by city">
+      {filter_nav(selected)}
+    </nav>
+    """
 
     if not articles:
         return shell(
-            """
+            top
+            + """
             <div class="empty">
-              No articles have been published yet.
+              No published coverage for this city yet.
             </div>
             """
+            + about_panel()
         )
 
     cards = []
@@ -359,6 +533,16 @@ def home():
     for article in articles:
         article_id = esc(
             article.get("article_id")
+        )
+
+        assisted = (
+            '<div class="assisted">'
+            'Technology-assisted'
+            '</div>'
+            if article.get(
+                "technology_assisted"
+            )
+            else ""
         )
 
         cards.append(
@@ -374,11 +558,7 @@ def home():
                 {esc(format_date(article.get("meeting_date")))}
               </div>
 
-              {
-                '<div class="assisted">Technology-assisted</div>'
-                if article.get("technology_assisted")
-                else ""
-              }
+              {assisted}
 
               <div class="headline">
                 {esc(article.get("headline"))}
@@ -393,7 +573,9 @@ def home():
         )
 
     return shell(
-        "".join(cards)
+        top
+        + "".join(cards)
+        + about_panel()
     )
 
 
