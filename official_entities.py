@@ -24,6 +24,7 @@ OFFICIAL_ENTITY_SOURCES = {
     "laguna-niguel": [
         "https://www.cityoflagunaniguel.org/396/Mayor-City-Council",
         "https://www.cityoflagunaniguel.org/Directory.aspx?did=80",
+        "https://www.cityoflagunaniguel.org/Directory.aspx?did=70",
     ],
     "lake-forest": [
         "https://www.lakeforestca.gov/city_government/city_council/index.php",

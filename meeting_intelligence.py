@@ -410,6 +410,86 @@ Aim for comprehensive reporter notes, not prose journalism.
             pass
 
 
+def _person_surname_token(text):
+    """
+    Return a conservative surname-like token for comparing an
+    observed transcript name with an official canonical name.
+
+    This is used only as a safety guard. False negatives are
+    preferable to falsely identifying a resident or staff member.
+    """
+    value = str(text or "").casefold()
+
+    # Split on whitespace first so O'Connor stays one logical token
+    # before punctuation is removed.
+    raw_tokens = value.split()
+
+    ignored = {
+        "mr", "mrs", "ms", "miss", "dr",
+        "mayor", "vice", "pro", "tem",
+        "councilmember", "council", "member",
+        "chair", "chairman", "chairwoman",
+        "sergeant", "sgt", "captain", "chief",
+    }
+
+    tokens = []
+
+    for token in raw_tokens:
+        cleaned = re.sub(
+            r"[^a-z0-9]",
+            "",
+            token,
+        )
+
+        if not cleaned:
+            continue
+
+        if cleaned in ignored:
+            continue
+
+        tokens.append(cleaned)
+
+    if not tokens:
+        return ""
+
+    return tokens[-1]
+
+
+def _person_correction_plausible(observed, canonical):
+    """
+    A model may propose an official person whose name really exists,
+    but that alone does not prove the transcript referred to them.
+
+    Require the surname-like portion to be exact or strongly similar
+    before allowing an observed -> canonical person correction.
+    """
+    from difflib import SequenceMatcher
+
+    observed_name = _person_surname_token(observed)
+    canonical_name = _person_surname_token(canonical)
+
+    if not observed_name or not canonical_name:
+        return False
+
+    if observed_name == canonical_name:
+        return True
+
+    # Very short tokens are unsafe for fuzzy identity matching.
+    if min(
+        len(observed_name),
+        len(canonical_name),
+    ) < 4:
+        return False
+
+    similarity = SequenceMatcher(
+        None,
+        observed_name,
+        canonical_name,
+    ).ratio()
+
+    return similarity >= 0.68
+
+
 def verify_entities(
     meeting,
     notes,
@@ -550,6 +630,14 @@ agenda does not identify her
     Do NOT use fuzzy similarity alone to identify an otherwise
     unidentified resident or public speaker.
 
+6B. The fact that a real official appears in the city directory
+    is NEVER enough by itself to replace an unrelated observed
+    name. The observed name must itself be a plausible phonetic,
+    transcription, title, or spelling variant of the official
+    name. For example, "Mr. Ordona" must NOT become
+    "Kevin O'Connor" merely because Kevin O'Connor is a relevant
+    city employee.
+
 7. For VERIFIED/CORRECTED entities, explain briefly where
    the official material supports the spelling.
 
@@ -689,6 +777,36 @@ Return ONLY JSON:
             "UNVERIFIED",
         }:
             status = "UNVERIFIED"
+
+        # PERSON IDENTITY SAFETY GUARD:
+        #
+        # The existence of a proposed canonical person in an
+        # official directory does NOT prove that an unrelated
+        # phonetic transcript name refers to that person.
+        #
+        # Reject implausible person-name substitutions before
+        # official-source promotion. This intentionally favors
+        # false negatives over false identification.
+        if (
+            entity_type == "person"
+            and canonical.casefold() != observed.casefold()
+            and not _person_correction_plausible(
+                observed,
+                canonical,
+            )
+        ):
+            proposed = canonical
+
+            canonical = observed
+            status = "UNVERIFIED"
+            confidence = "low"
+            evidence = (
+                "CouncilWatch rejected the proposed identity "
+                f"{proposed!r} because the observed transcript "
+                "name was not sufficiently similar. An official "
+                "person's existence alone is not enough to "
+                "identify the speaker."
+            )
 
         # Orange County GIS is authoritative for canonical
         # street spelling. Only apply it when Gemini identified
@@ -874,6 +992,9 @@ Score higher when justified for:
 - development and land use
 - regulations affecting residents/businesses
 - taxes and fees
+- elections, appointments and representation
+- cancellation of elections or ballot contests
+- actions that determine who holds public office
 - transportation
 - infrastructure
 - controversial public comment
@@ -881,6 +1002,17 @@ Score higher when justified for:
 
 A topic can be important even when it was DISCUSSED ONLY.
 Never convert discussion into an approval.
+
+When comparing topics, give substantial weight to FORMAL,
+BINDING government action. Actions affecting elections,
+representation, officeholders, taxes, land use, public safety,
+or large public expenditures usually outrank discussion-only
+public comment when their community impact is broader or more
+lasting.
+
+A petition or public-comment discussion may still rank highly,
+but do not place it above a consequential binding council action
+merely because the discussion was lengthy or emotionally vivid.
 
 Closed-session personnel evaluations with no reportable
 action usually score 1-2 and should not lead over
@@ -1120,7 +1252,79 @@ def writer_context(
         "- Never expand an UNVERIFIED partial/phonetic name."
     )
     lines.append(
+        "- CRITICAL: if a PERSON is UNVERIFIED, do not publish "
+        "that person's observed or proposed name in the headline, "
+        "dek, body, or key facts. Refer generically by supported "
+        "role, such as 'a resident' or 'a city staff member'."
+    )
+    lines.append(
+        "- The writer may NEVER independently correct an "
+        "UNVERIFIED person from the agenda or roster. Only names "
+        "marked VERIFIED or CORRECTED by this verification layer "
+        "may be published as identified people."
+    )
+    lines.append(
         "- Web evidence is for identity/spelling only."
+    )
+
+    lines.append("")
+    lines.append(
+        "PUBLISHABLE PERSON NAMES:"
+    )
+
+    publishable_people = []
+
+    for entity in intelligence.get(
+        "entities",
+        [],
+    ):
+        if entity.get("entity_type") != "person":
+            continue
+
+        if entity.get("status") not in {
+            "VERIFIED",
+            "CORRECTED",
+        }:
+            continue
+
+        canonical = str(
+            entity.get("canonical_text", "")
+        ).strip()
+
+        if (
+            canonical
+            and canonical not in publishable_people
+        ):
+            publishable_people.append(canonical)
+
+    if publishable_people:
+        for name in publishable_people:
+            lines.append(
+                f"- {name}"
+            )
+    else:
+        lines.append(
+            "- NONE"
+        )
+
+    lines.append("")
+    lines.append(
+        "PERSON NAME WHITELIST RULE:"
+    )
+    lines.append(
+        "- A human being may be named in the article ONLY if "
+        "their exact canonical name appears in PUBLISHABLE "
+        "PERSON NAMES above."
+    )
+    lines.append(
+        "- Any other human name found in notes, agenda text, "
+        "public comment, or model inference must NOT be "
+        "published by name."
+    )
+    lines.append(
+        "- For a non-whitelisted person, use only a supported "
+        "generic description such as 'a resident', "
+        "'a speaker', or 'a city staff member'."
     )
 
     lines.append("")
@@ -1164,6 +1368,47 @@ def writer_context(
     return "\n".join(lines)
 
 
+def deterministic_verification_notes(intelligence):
+    """
+    Verification notes are generated from the verifier's actual
+    result, never from the story-writing model.
+
+    Only unresolved person identities are surfaced here.
+    VERIFIED/CORRECTED identities need no ambiguity note.
+    """
+    notes = []
+    seen = set()
+
+    for entity in intelligence.get("entities", []):
+        if entity.get("entity_type") != "person":
+            continue
+
+        if entity.get("status") != "UNVERIFIED":
+            continue
+
+        observed = str(
+            entity.get("observed_text", "")
+        ).strip()
+
+        if not observed:
+            continue
+
+        key = observed.casefold()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        notes.append(
+            "The identity associated with the source reference "
+            f"{observed!r} remains unverified; CouncilWatch did "
+            "not rely on that name as an identified person."
+        )
+
+    return notes
+
+
 def make_rich_story(
     meeting,
     notes,
@@ -1187,6 +1432,9 @@ collapsing it into the easiest single vote.
 EDITORIAL REQUIREMENTS:
 
 - Lead with the strongest consequential public topic.
+- Prefer consequential binding government action over
+  discussion-only public comment when the coverage ranking
+  establishes broader or more lasting public impact.
 - Do not lead with routine closed-session personnel
   evaluations when stronger public business exists.
 - Include the substantive MUST INCLUDE topics from the
@@ -1201,10 +1449,47 @@ EDITORIAL REQUIREMENTS:
     * any privacy/data concerns actually raised
     * whether any action was taken
 - Include important dollar amounts when supported.
-- Explain why actions matter to residents.
+- Preserve the EXACT scope of contracts and approvals.
+  For example, if the council awards a professional-services
+  agreement for construction management or inspection, do NOT
+  describe it as though the council awarded the construction
+  contract itself.
+- Never pluralize or group unlike council actions under a
+  misleading action label. If one item is a professional
+  services contract and another is approval of a project phase,
+  design, environmental document, ordinance, or resolution,
+  do NOT describe them collectively as "contracts".
+- This exact-action rule applies especially to the headline
+  and dek.
+- Explain why actions matter to residents using concrete,
+  supported consequences rather than generic significance.
 - Avoid ceremonial filler unless genuinely newsworthy.
+- Write in restrained, neutral newspaper language.
+- Avoid promotional or inflated phrases such as:
+  "took decisive action", "major investment",
+  "significant investment", "significant discussion",
+  "represents a major investment", "growing policy tension",
+  or "long-standing commitment" unless that characterization
+  is itself supported and necessary.
+- Prefer specific verbs such as approved, awarded, adopted,
+  appointed, canceled, discussed, rejected, or directed.
+- Do not turn planning history into claims about "promises",
+  "commitments", or obligations unless the supplied evidence
+  explicitly establishes that characterization.
 - Use verified/corrected proper-noun spellings below.
-- Never manufacture a full name for an UNVERIFIED person.
+- PERSON NAMES ARE WHITELISTED. A human being may be named
+  ONLY if their exact canonical name appears under
+  PUBLISHABLE PERSON NAMES in the verified context below.
+- This applies even if a name appears clearly in the recording
+  notes or official agenda. If it is not on the whitelist,
+  do not publish it by name.
+- For any non-whitelisted person, use only a supported generic
+  description such as "a resident", "a speaker",
+  "a council member", or "a city staff member".
+- NEVER independently resolve or correct a person using the
+  agenda, roster, context clues, spelling similarity, or your
+  own inference. Identity decisions belong exclusively to the
+  verification layer.
 - Do not add factual web material merely because it appeared
   during name verification.
 
@@ -1216,9 +1501,16 @@ A genuinely quiet meeting may be shorter.
 HEADLINE:
 Choose the most newsworthy theme or two.
 Do not automatically headline the first agenda item.
+Prefer concrete government actions over vague labels such as
+"major projects" or "major developments."
+Do not broaden the scope of a contract or approval.
 
 DEK:
 One clear sentence explaining the main significance.
+State precisely what the council actually approved, awarded,
+appointed, canceled, discussed or rejected.
+Do not compress a professional-services agreement into a
+construction contract or otherwise overstate an action.
 
 BODY:
 Use normal news paragraphs. Usually 6-10 paragraphs for
@@ -1313,6 +1605,53 @@ NON-NEGOTIABLE EDITORIAL RULES:
    - staff recommendations
 
 9. Keep normal newspaper-style paragraphs and a concise dek.
+
+10. Use restrained, neutral local-news language. Remove generic
+    AI/news-release phrasing such as "took decisive action",
+    "major investment", "significant investment",
+    "represents a major investment", or "growing policy tension"
+    unless the characterization is directly supported and needed.
+
+11. Preserve exact action and contract scope. A contract for
+    construction management, inspection, design, consulting or
+    other professional services must NOT be rewritten as though
+    the council awarded the underlying construction project.
+
+12. Prefer concrete government verbs and consequences:
+    approved, awarded, adopted, appointed, canceled, discussed,
+    rejected, directed, amount spent, election affected,
+    property affected, rule changed, or next step established.
+
+13. If a formal action changes elections, representation or who
+    will hold public office, treat that as inherently significant
+    civic news and follow the coverage-plan ranking accordingly.
+
+14. PERSON-NAME SAFETY IS NON-NEGOTIABLE. If the verification
+    context marks a person UNVERIFIED, remove that person's name
+    from headline, dek, body and key facts. Refer generically by
+    a supported role. Do not independently infer that an
+    UNVERIFIED transcript name belongs to someone named in the
+    agenda or city directory.
+
+15. Do not invent verification corrections. A person's identity
+    may be described as corrected only when the verification
+    context itself marks that entity CORRECTED.
+
+16. PERSON NAMES ARE AN EXPLICIT WHITELIST. Scan headline, dek,
+    body and key facts. Every named human being must appear
+    exactly under PUBLISHABLE PERSON NAMES in the verification
+    context. If not, remove the name and substitute a supported
+    generic role. A name appearing in the raw notes or agenda is
+    NOT sufficient authorization to publish it.
+
+17. Preserve each council action's exact type in headline, dek
+    and body. Do not collectively call unlike actions
+    "contracts", "approvals", or another narrower term when that
+    description is not true for every item being grouped.
+
+18. Do not describe historical planning decisions as promises,
+    commitments or obligations unless the evidence explicitly
+    says that.
 
 ================ COVERAGE PLAN ================
 
@@ -1471,5 +1810,14 @@ REQUIREMENTS:
             words_before,
             "words"
         )
+
+    # Never trust the writing model to invent or infer
+    # verification notes. They come directly from the
+    # deterministic verification result.
+    final_story.verification_notes = (
+        deterministic_verification_notes(
+            intelligence
+        )
+    )
 
     return final_story
