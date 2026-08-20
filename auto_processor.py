@@ -122,7 +122,7 @@ def classify_error(exc, attempts):
     if any(x in low for x in api_terms):
         return (
             "deferred_api",
-            now() + timedelta(hours=4),
+            now() + timedelta(hours=1),
             message,
         )
 

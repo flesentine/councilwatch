@@ -295,6 +295,7 @@ def _download_youtube(recording_url, output):
             subprocess.run(
                 cmd,
                 check=True,
+                timeout=1800,
             )
 
             if (
@@ -315,6 +316,19 @@ def _download_youtube(recording_url, output):
                 f"{attempt['name']}: "
                 "command completed but MP3 missing"
             )
+
+        except subprocess.TimeoutExpired:
+            errors.append(
+                f"{attempt['name']}: timed out after 30 minutes"
+            )
+
+            print()
+            print(
+                "    Attempt timed out; "
+                "trying fallback..."
+            )
+
+            time.sleep(3)
 
         except subprocess.CalledProcessError as exc:
             errors.append(
