@@ -17,7 +17,11 @@ from official_entities import (
     find_official_support,
 )
 
-from settings import STORY_MODEL, TRANSCRIPT_MODEL
+from settings import (
+    STORY_MODEL,
+    TRANSCRIPT_MODEL,
+    TRANSCRIPT_FALLBACK_MODELS,
+)
 
 
 OFFICIAL_DOMAINS = {
@@ -381,16 +385,78 @@ Aim for comprehensive reporter notes, not prose journalism.
 """
 
     try:
-        response = retry_api_call(
-            "Comprehensive source notes",
-            lambda: client.models.generate_content(
-                model=TRANSCRIPT_MODEL,
-                contents=[
-                    uploaded,
-                    prompt,
-                ],
-            ),
-        )
+        models = [
+            TRANSCRIPT_MODEL,
+            *[
+                model
+                for model in TRANSCRIPT_FALLBACK_MODELS
+                if model != TRANSCRIPT_MODEL
+            ],
+        ]
+
+        response = None
+        last_exc = None
+
+        for index, model in enumerate(models):
+            print()
+            print(
+                "Comprehensive source notes: "
+                f"trying model {model}"
+            )
+
+            try:
+                response = retry_api_call(
+                    f"Comprehensive source notes ({model})",
+                    lambda model=model: client.models.generate_content(
+                        model=model,
+                        contents=[
+                            uploaded,
+                            prompt,
+                        ],
+                    ),
+                )
+
+                print(
+                    "Comprehensive source notes: "
+                    f"success with {model}"
+                )
+                break
+
+            except Exception as exc:
+                last_exc = exc
+                message = str(exc).lower()
+
+                temporary = (
+                    "429" in message
+                    or "503" in message
+                    or "resource_exhausted" in message
+                    or "unavailable" in message
+                    or "high demand" in message
+                    or "quota" in message
+                )
+
+                has_fallback = (
+                    index < len(models) - 1
+                )
+
+                if not temporary or not has_fallback:
+                    raise
+
+                next_model = models[index + 1]
+
+                print()
+                print(
+                    f"{model} unavailable; "
+                    f"falling back to {next_model}."
+                )
+
+        if response is None:
+            if last_exc:
+                raise last_exc
+
+            raise RuntimeError(
+                "No transcript model produced a response."
+            )
 
         notes = response.text or ""
 

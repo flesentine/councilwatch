@@ -36,6 +36,15 @@ TRANSCRIPT_MODEL = _first(
     "GEMINI_TRANSCRIPT_MODEL", "GEMINI_TRANSCRIBE_MODEL", "TRANSCRIPT_MODEL", "GEMINI_MODEL",
     default="gemini-3.1-flash-lite",
 )
+
+TRANSCRIPT_FALLBACK_MODELS = [
+    model.strip()
+    for model in _first(
+        "GEMINI_TRANSCRIPT_FALLBACK_MODELS",
+        default="gemini-3.5-flash,gemini-2.5-flash",
+    ).split(",")
+    if model.strip()
+]
 STORY_MODEL = _first(
     "GEMINI_STORY_MODEL", "STORY_MODEL", "GEMINI_MODEL",
     default="gemini-3.1-flash-lite",
