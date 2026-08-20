@@ -1,0 +1,14 @@
+[Unit]
+Description=CouncilWatch public web site
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/flese/councilwatch-five-story-review
+ExecStart=/home/flese/councilwatch-five-story-review/.venv/bin/uvicorn public_site:app --host 0.0.0.0 --port 8090
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
