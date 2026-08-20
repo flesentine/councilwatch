@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -62,8 +63,13 @@ main{
     display:block;
     text-decoration:none;
     color:inherit;
-    padding:24px 0;
+    padding:28px 0;
     border-bottom:1px solid #cbc6bc;
+    transition:opacity .15s ease;
+}
+
+.card:hover{
+    opacity:.72;
 }
 
 .city{
@@ -80,6 +86,20 @@ main{
     color:#777168;
     font-size:12px;
     margin-top:5px;
+}
+
+.assisted{
+    display:inline-block;
+    margin-top:9px;
+    font-family:Arial,sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    font-size:9px;
+    font-weight:700;
+    color:#777168;
+    border:1px solid #c9c4ba;
+    border-radius:999px;
+    padding:4px 7px;
 }
 
 .headline{
@@ -101,6 +121,7 @@ main{
 .story h1{
     font-size:clamp(38px,7vw,60px);
     line-height:1.02;
+    letter-spacing:-.025em;
     margin:12px 0;
 }
 
@@ -177,6 +198,28 @@ def esc(value):
     return html.escape(
         str(value or "")
     )
+
+
+def format_date(value):
+    text = str(value or "").strip()
+
+    if not text:
+        return ""
+
+    try:
+        dt = datetime.strptime(
+            text[:10],
+            "%Y-%m-%d",
+        )
+
+        return (
+            f"{dt.strftime('%B')} "
+            f"{dt.day}, "
+            f"{dt.year}"
+        )
+
+    except ValueError:
+        return text
 
 
 def safe_url(value):
@@ -328,8 +371,14 @@ def home():
               </div>
 
               <div class="date">
-                {esc(article.get("meeting_date"))}
+                {esc(format_date(article.get("meeting_date")))}
               </div>
+
+              {
+                '<div class="assisted">Technology-assisted</div>'
+                if article.get("technology_assisted")
+                else ""
+              }
 
               <div class="headline">
                 {esc(article.get("headline"))}
@@ -421,9 +470,9 @@ def article_page(
     ):
         technology_note = """
         <div class="note">
-          This report was prepared with
+          This report was prepared using
           technology-assisted analysis of official
-          public meeting materials and reviewed
+          public meeting materials and was reviewed
           before publication.
         </div>
         """
@@ -440,6 +489,12 @@ def article_page(
         {esc(article.get("city_name"))}
       </div>
 
+      {
+        '<div class="assisted">Technology-assisted</div>'
+        if article.get("technology_assisted")
+        else ""
+      }
+
       <h1>
         {esc(article.get("headline"))}
       </h1>
@@ -449,8 +504,8 @@ def article_page(
       </div>
 
       <div class="meta">
-        Meeting date:
-        {esc(article.get("meeting_date"))}
+        {esc(format_date(article.get("meeting_date")))}
+        · Local government coverage
       </div>
 
       {body}
