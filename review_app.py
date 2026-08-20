@@ -11,6 +11,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from agenda import agenda_text
 from gemini_worker import StoryDraft, audit_story
 from meeting_intelligence import audit_verification_context
+from publishing import (
+    publish_copy,
+    remove_published_copy,
+    published_path,
+)
 from settings import DRAFTS, STATUS_FILE, CITY_NAMES
 
 
@@ -616,6 +621,39 @@ def story(slug: str, external_id: str):
 
     rs = review_status(target)
 
+    is_published = bool(
+        target.get("published")
+    )
+
+    if is_published:
+        publication_label = "Published locally"
+
+        publish_controls = """
+        <button class="danger"
+                onclick="unpublishStory()">
+          Unpublish
+        </button>
+        """
+
+    elif (
+        rs == "approved"
+        and audit_ok is True
+    ):
+        publication_label = (
+            "Approved · ready to publish"
+        )
+
+        publish_controls = """
+        <button class="primary"
+                onclick="publishStory()">
+          Publish locally
+        </button>
+        """
+
+    else:
+        publication_label = "Not published"
+        publish_controls = ""
+
     current_note = target.get(
         "review_note",
         "",
@@ -661,6 +699,8 @@ def story(slug: str, external_id: str):
         <button onclick="reaudit()">
           Re-audit
         </button>
+
+        {publish_controls}
       </div>
 
       <div id="action-message"
@@ -731,6 +771,67 @@ async function reaudit() {
 
     location.reload();
 }
+
+
+async function publishStory() {
+    const box = document.getElementById(
+        "action-message"
+    );
+
+    box.style.display = "block";
+    box.textContent =
+        "Publishing approved revision locally...";
+
+    const r = await fetch(
+        `/api/publish/${SLUG}/${EXTERNAL_ID}`,
+        {
+            method: "POST"
+        }
+    );
+
+    const data = await r.json();
+
+    if (!r.ok) {
+        box.textContent =
+            data.error || "Publish failed.";
+        return;
+    }
+
+    location.reload();
+}
+
+
+async function unpublishStory() {
+    if (!confirm(
+        "Remove this article from the local published store?"
+    )) {
+        return;
+    }
+
+    const box = document.getElementById(
+        "action-message"
+    );
+
+    box.style.display = "block";
+    box.textContent = "Unpublishing...";
+
+    const r = await fetch(
+        `/api/unpublish/${SLUG}/${EXTERNAL_ID}`,
+        {
+            method: "POST"
+        }
+    );
+
+    const data = await r.json();
+
+    if (!r.ok) {
+        box.textContent =
+            data.error || "Unpublish failed.";
+        return;
+    }
+
+    location.reload();
+}
 </script>
 """ % (
         json.dumps(slug),
@@ -761,7 +862,7 @@ async function reaudit() {
         ·
         {esc(review_label(rs))}
         ·
-        Not published
+        {esc(publication_label)}
       </div>
 
       {review_panel}
@@ -1088,13 +1189,20 @@ async def review_action(
         target["approved_at"] = now()
         target["rejected_at"] = None
 
-    elif status == "rejected":
-        target["approved_at"] = None
-        target["rejected_at"] = now()
-        target["published"] = False
-
     else:
         target["approved_at"] = None
+
+        if status == "rejected":
+            target["rejected_at"] = now()
+
+        if target.get("published"):
+            remove_published_copy(
+                target
+            )
+
+            target["published"] = False
+            target["published_at"] = None
+            target["unpublished_at"] = now()
 
     write_json(
         path,
@@ -1243,7 +1351,15 @@ async def save_story(
         "stale_after_manual_edit"
     )
 
+    if target.get("published"):
+        remove_published_copy(
+            target
+        )
+
+        target["unpublished_at"] = now()
+
     target["published"] = False
+    target["published_at"] = None
 
     write_json(
         path,
@@ -1253,6 +1369,141 @@ async def save_story(
     return {
         "ok": True,
         "revision": target["revision"],
+    }
+
+
+@app.post(
+    "/api/publish/{slug}/{external_id}"
+)
+def publish_story(
+    slug: str,
+    external_id: str,
+):
+    path, target = find_draft(
+        slug,
+        external_id,
+    )
+
+    if not target:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Draft not found.",
+            },
+            status_code=404,
+        )
+
+    if target.get("audit_ok") is not True:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Publish blocked: this exact revision "
+                    "does not have a passing audit."
+                ),
+            },
+            status_code=409,
+        )
+
+    if review_status(
+        target
+    ) != "approved":
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": (
+                    "Publish blocked: approve this exact "
+                    "revision first."
+                ),
+            },
+            status_code=409,
+        )
+
+    backup_revision(
+        path,
+        target,
+    )
+
+    stamp = now()
+
+    target["published"] = True
+    target["published_at"] = stamp
+    target["last_published_at"] = stamp
+    target["unpublished_at"] = None
+    target["published_revision"] = int(
+        target.get(
+            "revision",
+            1,
+        )
+    )
+
+    public_path = publish_copy(
+        target
+    )
+
+    write_json(
+        path,
+        target,
+    )
+
+    return {
+        "ok": True,
+        "published": True,
+        "published_at": stamp,
+        "published_revision":
+            target["published_revision"],
+        "local_path":
+            str(public_path),
+    }
+
+
+@app.post(
+    "/api/unpublish/{slug}/{external_id}"
+)
+def unpublish_story(
+    slug: str,
+    external_id: str,
+):
+    path, target = find_draft(
+        slug,
+        external_id,
+    )
+
+    if not target:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Draft not found.",
+            },
+            status_code=404,
+        )
+
+    backup_revision(
+        path,
+        target,
+    )
+
+    removed = remove_published_copy(
+        target
+    )
+
+    stamp = now()
+
+    target["published"] = False
+    target["published_at"] = None
+    target["unpublished_at"] = stamp
+
+    write_json(
+        path,
+        target,
+    )
+
+    return {
+        "ok": True,
+        "published": False,
+        "unpublished_at": stamp,
+        "removed_path":
+            str(removed),
     }
 
 
@@ -1472,6 +1723,16 @@ def reaudit_story(
     if target.get(
         "review_status"
     ) == "approved":
+
+        if target.get("published"):
+            remove_published_copy(
+                target
+            )
+
+            target["published"] = False
+            target["published_at"] = None
+            target["unpublished_at"] = now()
+
         target["review_status"] = (
             "needs_review"
         )
@@ -1522,5 +1783,12 @@ def health():
             for d in drafts
             if review_status(d)
             == "rejected"
+        ),
+        "published": sum(
+            1
+            for d in drafts
+            if bool(
+                d.get("published")
+            )
         ),
     }

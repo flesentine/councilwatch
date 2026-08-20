@@ -11,6 +11,7 @@ __pycache__/
 *.pem
 
 # Runtime / generated meeting material
+published/
 drafts/
 work/
 logs/
