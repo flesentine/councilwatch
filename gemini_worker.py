@@ -213,6 +213,14 @@ Do NOT treat a stylistic preference as a material factual error.
 
 Material errors include:
 - unsupported or misspelled names/titles
+- merging two distinct or ambiguously related technologies,
+  programs, contracts or council actions into one factual claim
+- attributing staff direction, funding, data collection,
+  retention, enforcement or law-enforcement sharing to a
+  technology when the source supports it only for another
+- unsupported interpretive claims such as "sets a precedent",
+  "signals a formal commitment", "represents a formal shift",
+  or guarantees/ensures a future consequence
 - unsupported dates, vote counts, dollar amounts, addresses, contract values
 - proposal/recommendation described as final council action, or vice versa
 - materially misleading headline/dek

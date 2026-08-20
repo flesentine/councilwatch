@@ -369,6 +369,19 @@ Cover, when present:
 - major consent-calendar expenditures
 - discussions where NO vote was taken
 
+TECHNOLOGY SEPARATION RULE:
+- Never merge different technologies merely because they were
+  discussed near each other.
+- Treat speed-feedback signs, portable message boards,
+  digital signage, ALPR/license-plate readers, Flock cameras,
+  surveillance cameras and similar systems as distinct unless
+  the recording explicitly establishes that they are the same.
+- Attach staff direction, funding, data collection, retention,
+  law-enforcement sharing and enforcement use ONLY to the
+  specific technology the recording supports.
+- If the recording is ambiguous about whether two technologies
+  are the same, preserve that ambiguity instead of resolving it.
+
 For discussion-only subjects, explicitly say:
 DISCUSSION ONLY — NO COUNCIL ACTION CONFIRMED.
 
@@ -1094,6 +1107,25 @@ If ALPR, license-plate readers, Flock Safety or similar
 camera technology appears ANYWHERE in the notes, it must
 receive its own coverage item.
 
+Do NOT merge separate technologies or separate council actions
+into one coverage item merely because they appeared in the same
+discussion. In particular, distinguish speed-feedback/digital
+signage from ALPR/Flock unless the source clearly establishes
+they are the same technology or part of the same proposal.
+
+The summary and why_it_matters fields must NOT introduce new
+facts or consequences. They are editorial ranking aids only.
+
+Do not say an action:
+- "sets a precedent"
+- "signals a commitment"
+- "represents a formal shift"
+- "ensures" a future result
+- establishes a new standard
+
+unless that consequence is explicitly supported by the notes
+or official agenda.
+
 Choose approximately 4-7 substantive topics.
 
 Set must_include=true for roughly the top 3-5 items
@@ -1263,6 +1295,40 @@ def build_meeting_intelligence(
         "verification_warning":
             verification_warning,
     }
+
+
+def audit_verification_context(intelligence):
+    """
+    Identity/spelling evidence for the final fact audit.
+
+    Deliberately excludes the AI-generated coverage plan and
+    editorial_summary so generated editorial interpretation can
+    never become evidence for another model-generated claim.
+    """
+    lines = [
+        "VERIFIED ENTITY CONTEXT:",
+        "IDENTITY/SPELLING ONLY — NOT EVIDENCE OF MEETING ACTIONS,",
+        "POLICY EFFECTS, TECHNICAL RELATIONSHIPS OR CONSEQUENCES.",
+    ]
+
+    for entity in intelligence.get("entities", []):
+        status = str(
+            entity.get("status", "UNVERIFIED")
+        ).strip()
+
+        observed = str(
+            entity.get("observed_text", "")
+        ).strip()
+
+        canonical = str(
+            entity.get("canonical_text", observed)
+        ).strip()
+
+        lines.append(
+            f"- {status}: {observed!r} -> {canonical!r}"
+        )
+
+    return "\n".join(lines)
 
 
 def writer_context(
@@ -1495,6 +1561,15 @@ Meeting title: {meeting.get("title")}
 The story must reflect the WHOLE meeting rather than
 collapsing it into the easiest single vote.
 
+IMPORTANT EVIDENCE RULE:
+The coverage plan below is an EDITORIAL RANKING TOOL, not a
+factual source. Its summaries and "why it matters" language
+must never be used to establish a fact, consequence, precedent,
+commitment, motive, or technical relationship.
+
+Factual claims must come from the recording-derived notes or
+official agenda material.
+
 EDITORIAL REQUIREMENTS:
 
 - Lead with the strongest consequential public topic.
@@ -1542,6 +1617,16 @@ EDITORIAL REQUIREMENTS:
 - Do not turn planning history into claims about "promises",
   "commitments", or obligations unless the supplied evidence
   explicitly establishes that characterization.
+- Do not say an action "sets a precedent", "signals a formal
+  commitment", "represents a formal shift", or guarantees a
+  future result unless the recording-derived notes or official
+  agenda explicitly support that conclusion.
+- Never merge distinct technologies. Speed-feedback signs,
+  digital message boards, ALPR/license-plate readers and Flock
+  systems must remain separate unless the source explicitly
+  establishes their relationship.
+- Staff direction concerning one technology must not be
+  generalized to another technology.
 - Use verified/corrected proper-noun spellings below.
 - PERSON NAMES ARE WHITELISTED. A human being may be named
   ONLY if their exact canonical name appears under

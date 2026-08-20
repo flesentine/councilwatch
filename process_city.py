@@ -17,6 +17,7 @@ from meetings import latest_ready_meetings
 from meeting_intelligence import (
     build_meeting_intelligence,
     writer_context,
+    audit_verification_context,
     make_rich_story,
     make_comprehensive_source_notes,
     retry_api_call,
@@ -473,10 +474,16 @@ def process_city(
                 f"{must}"
             )
 
+        # IMPORTANT:
+        # The fact-checker receives source notes plus deterministic
+        # entity identity/spelling context ONLY.
+        #
+        # Never feed the AI-generated coverage plan or editorial
+        # "why it matters" reasoning back as source evidence.
         audit_notes = (
             notes
             + "\n\n"
-            + writer_context(
+            + audit_verification_context(
                 intelligence
             )
         )
