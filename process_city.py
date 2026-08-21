@@ -585,31 +585,51 @@ def process_city(
 
             break
 
-        # Always run one final audit against exactly
-        # the text that will be saved.
-        print()
-        print("Running FINAL audit on saved copy...")
+        # Always audit exactly the text that will be saved.
+        # If the final audit finds a usable correction, including
+        # a minor one, apply it and audit the corrected copy again.
+        for final_pass in range(1, 3):
+            print()
+            print(
+                "Running FINAL audit on saved copy "
+                f"(pass {final_pass})..."
+            )
 
-        final_audit = retry_api_call(
-            "Final audit",
-            lambda: audit_story(
-                meeting,
-                audit_notes,
-                agenda,
+            final_audit = retry_api_call(
+                f"Final audit pass {final_pass}",
+                lambda: audit_story(
+                    meeting,
+                    audit_notes,
+                    agenda,
+                    story,
+                ),
+            )
+
+            valid_issues = valid_audit_issues(
                 story,
-            ),
-        )
+                final_audit,
+            )
 
-        valid_issues = valid_audit_issues(
-            story,
-            final_audit,
-        )
+            material = [
+                issue
+                for issue in valid_issues
+                if issue.severity.lower() == "material"
+            ]
 
-        material = [
-            issue
-            for issue in valid_issues
-            if issue.severity.lower() == "material"
-        ]
+            if valid_issues:
+                changed = apply_audit_corrections(
+                    story,
+                    final_audit,
+                )
+
+                if changed:
+                    print(
+                        "  Final-audit correction applied; "
+                        "auditing corrected copy again."
+                    )
+                    continue
+
+            break
 
         final_ok = len(material) == 0
 

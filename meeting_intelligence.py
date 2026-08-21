@@ -1962,6 +1962,155 @@ REQUIREMENTS:
             "words"
         )
 
+    # --------------------------------------------------
+    # FINAL EVIDENCE / RESTRAINT PASS
+    # --------------------------------------------------
+    #
+    # IMPORTANT:
+    # The depth-expansion pass runs after the main editorial
+    # enforcement pass. Without this final pass, expansion can
+    # reintroduce promotional language, unsupported causal
+    # claims, ambiguous technology references, or inferred
+    # motives/consequences.
+    #
+    # This pass receives source evidence directly and NO
+    # coverage-plan "why it matters" material.
+
+    print(
+        "Running final evidence/restraint pass..."
+    )
+
+    final_restraint_prompt = f"""
+You are the FINAL copy desk for CouncilWatch.
+
+Review and, where needed, rewrite the article below.
+
+This is the last writing pass before the independent factual
+audit. Be conservative.
+
+Use ONLY:
+1. the recording-derived evidence
+2. the official agenda material
+
+Do NOT use editorial-ranking language or outside knowledge as
+evidence.
+
+NON-NEGOTIABLE RULES:
+
+1. PRESERVE EXACT GOVERNMENT ACTION.
+   Distinguish approved, awarded, adopted, appointed, canceled,
+   discussed, proposed, recommended and directed.
+
+2. DO NOT INFER MOTIVE.
+   Never say an action was taken "to save money", "to increase
+   transparency", "to demonstrate commitment", or for another
+   motive unless officials explicitly established that motive
+   in the supplied evidence.
+
+3. DO NOT INFER CONSEQUENCES OR SIGNIFICANCE.
+   Remove unsupported language such as:
+   - sets a precedent
+   - signals a formal commitment
+   - formal commitment
+   - long-standing commitment
+   - represents a formal shift
+   - major investment
+   - significant investment
+   - decisive action
+   - growing policy tension
+   - guarantees
+   - ensures a future result
+
+   Replace such wording with the concrete action actually taken.
+
+4. DO NOT INVENT CAUSAL LINKS.
+   Do not say one event "prompted", "led to", "resulted in",
+   "caused", or "triggered" another action unless the source
+   explicitly establishes that relationship.
+
+5. PUBLIC COMMENT MUST REMAIN ATTRIBUTED AND NEUTRAL.
+   Do not intensify a speaker's remarks.
+   A request for information or assurances must not become
+   "anxiety", "fear", "negative impact", or another stronger
+   characterization unless the speaker actually expressed it.
+
+6. TECHNOLOGY SEPARATION IS STRICT.
+   Speed-feedback signs, portable message boards, digital
+   signage, ALPR/license-plate readers, Flock cameras and other
+   surveillance technologies are DISTINCT unless the evidence
+   explicitly establishes otherwise.
+
+   When more than one technology appears in a story:
+   - name the specific technology attached to each factual claim
+   - do NOT use ambiguous phrases such as "these systems",
+     "these devices", "the technology", or "additional units"
+     when the antecedent could refer to more than one system
+   - attach acquisition, funding, placement, data collection,
+     retention, sharing and enforcement ONLY to the specific
+     technology supported by the source
+
+7. A committee's creation does not by itself establish future
+   funding, resource allocation, policy adoption, commitment,
+   or implementation. State only the mandate actually supported.
+
+8. Do not transform staff's existing activity into a response
+   caused by public comment unless chronology and causation are
+   explicitly established.
+
+9. Avoid promotional adjectives and generic importance claims.
+   Prefer concrete facts, amounts, votes, locations, rules and
+   next steps.
+
+10. Do not add any new human names. Preserve only names already
+    present in the current article.
+
+11. Preserve useful supported detail. This is a cleanup pass,
+    not an instruction to make the article vague or shorter.
+
+12. Headline, dek, body and key facts must all obey these rules.
+
+================ CURRENT ARTICLE ================
+
+{final_story.model_dump_json(indent=2)}
+
+================ RECORDING-DERIVED EVIDENCE ================
+
+{notes[:55000]}
+
+================ OFFICIAL AGENDA ================
+
+{agenda[:40000]}
+"""
+
+    restraint_response = retry_api_call(
+        "Final evidence/restraint pass",
+        lambda: client.models.generate_content(
+            model=STORY_MODEL,
+            contents=final_restraint_prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=StoryDraft,
+                temperature=0.05,
+            ),
+        ),
+    )
+
+    restrained = getattr(
+        restraint_response,
+        "parsed",
+        None,
+    )
+
+    if isinstance(
+        restrained,
+        StoryDraft,
+    ):
+        final_story = restrained
+    else:
+        final_story = StoryDraft.model_validate_json(
+            restraint_response.text
+        )
+
     # Never trust the writing model to invent or infer
     # verification notes. They come directly from the
     # deterministic verification result.

@@ -209,7 +209,16 @@ A valid audit issue MUST:
 Do NOT invent a sentence that is not actually in the draft.
 Do NOT claim "the body says..." unless that exact wording appears in the body.
 Do NOT fail the draft because a fact appears in key_facts rather than body.
-Do NOT treat a stylistic preference as a material factual error.
+Do NOT treat a purely stylistic preference as a material
+factual error.
+
+However, wording is NOT merely stylistic when it adds or
+strengthens a motive, consequence, causal relationship,
+technical relationship, emotional characterization, policy
+commitment, or factual significance that the supplied evidence
+does not establish.
+
+A claim can sound plausible and still be unsupported.
 
 Material errors include:
 - unsupported or misspelled names/titles
@@ -218,11 +227,37 @@ Material errors include:
 - attributing staff direction, funding, data collection,
   retention, enforcement or law-enforcement sharing to a
   technology when the source supports it only for another
+- ambiguous technology references such as "these systems",
+  "these devices", "the technology", or "additional units"
+  when multiple distinct technologies are in context and the
+  source does not establish which one the claim describes
+- unsupported causal claims that one event prompted, caused,
+  triggered, led to, or resulted in another action
+- unsupported motives attributed to officials or a government
+  action, even when the inferred motive seems reasonable
+- public-comment paraphrases that materially intensify what a
+  speaker actually said, such as converting a request for
+  information or assurances into fear, anxiety, harm, or a
+  claimed negative impact
+- unsupported claims that creating a committee itself commits
+  city resources, funding, policy adoption or implementation
 - unsupported interpretive claims such as "sets a precedent",
-  "signals a formal commitment", "represents a formal shift",
+  "signals a formal commitment", "formal commitment",
+  "long-standing commitment", "represents a formal shift",
+  "major investment", "significant investment",
+  "decisive action", "growing policy tension",
   or guarantees/ensures a future consequence
 - unsupported dates, vote counts, dollar amounts, addresses, contract values
+- incorrect spelling of a publishable proper name; known name
+  corrections must not survive into publication
 - proposal/recommendation described as final council action, or vice versa
+- describing approval of design, environmental documentation,
+  professional services, construction management, inspection,
+  or another project phase as approval/award of the entire
+  underlying project or construction contract
+- a headline, dek or key fact that obscures professional-services
+  contract scope in a way that could imply the underlying
+  construction contract itself was awarded
 - materially misleading headline/dek
 - one underlying financial fact misleadingly represented as two different savings/cost facts
 - a concrete factual claim unsupported by BOTH the notes and agenda
@@ -235,11 +270,15 @@ Minor issues include:
 Set ok=true when there are NO material errors.
 Minor issues alone do not make ok=false.
 
-If ok=false:
+If there are ANY valid issues, whether material or minor:
 - return the FULL corrected headline, dek, body, key_facts, and verification_notes.
 - preserve supported material; only change what is necessary.
 
-If ok=true:
+Set ok=false when one or more MATERIAL issues exist.
+Minor issues alone may leave ok=true, but their corrected fields
+must still be supplied so the pipeline can repair them.
+
+If there are NO valid issues:
 - leave all corrected_* fields empty.
 
 SOURCE NOTES:
@@ -283,9 +322,18 @@ DRAFT JSON:
 
     result.issues = valid_issues
 
-    material = [i for i in valid_issues if i.severity.lower() == "material"]
-    if not material:
-        result.ok = True
+    material = [
+        i
+        for i in valid_issues
+        if i.severity.lower() == "material"
+    ]
+
+    result.ok = not bool(material)
+
+    # Keep corrected fields whenever ANY valid issue remains,
+    # including minor errors. process_city can then apply the
+    # supplied correction instead of knowingly saving the error.
+    if not valid_issues:
         result.corrected_headline = ""
         result.corrected_dek = ""
         result.corrected_body = []
