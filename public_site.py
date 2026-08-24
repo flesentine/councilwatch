@@ -118,6 +118,79 @@ main{
     border-color:#1e1e1e;
 }
 
+
+.signup{
+    margin-top:42px;
+    padding:25px 0 28px;
+    border-top:1px solid #bbb5aa;
+    border-bottom:1px solid #bbb5aa;
+}
+
+.signup h2{
+    margin:0 0 7px;
+    font-size:22px;
+}
+
+.signup-copy{
+    max-width:660px;
+    margin:0 0 16px;
+    font-size:16px;
+    line-height:1.5;
+    color:#4a4741;
+}
+
+.signup-form{
+    display:flex;
+    gap:8px;
+    max-width:570px;
+}
+
+.signup-form input[type="email"]{
+    flex:1;
+    min-width:0;
+    padding:11px 12px;
+    border:1px solid #aaa49a;
+    background:#fcfbf7;
+    color:#181818;
+    border-radius:4px;
+    font:15px Arial,sans-serif;
+}
+
+.signup-form button{
+    padding:11px 17px;
+    border:1px solid #1e1e1e;
+    border-radius:4px;
+    background:#1e1e1e;
+    color:#fff;
+    font:700 14px Arial,sans-serif;
+    cursor:pointer;
+}
+
+.signup-form button:hover{
+    opacity:.82;
+}
+
+.signup-small{
+    margin-top:9px;
+    font:11px/1.4 Arial,sans-serif;
+    color:#777168;
+}
+
+@media(max-width:600px){
+    .signup-form{
+        display:block;
+    }
+
+    .signup-form input[type="email"]{
+        width:100%;
+        margin-bottom:8px;
+    }
+
+    .signup-form button{
+        width:100%;
+    }
+}
+
 .about{
     margin-top:44px;
     padding-top:24px;
@@ -150,6 +223,14 @@ main{
     opacity:.72;
 }
 
+/*
+Only use story borders as separators BETWEEN stories.
+The About section supplies the final divider.
+*/
+.card:last-of-type{
+    border-bottom:0;
+}
+
 .city{
     font-family:Arial,sans-serif;
     text-transform:uppercase;
@@ -166,19 +247,6 @@ main{
     margin-top:5px;
 }
 
-.assisted{
-    display:inline-block;
-    margin-top:9px;
-    font-family:Arial,sans-serif;
-    text-transform:uppercase;
-    letter-spacing:.08em;
-    font-size:9px;
-    font-weight:700;
-    color:#777168;
-    border:1px solid #c9c4ba;
-    border-radius:999px;
-    padding:4px 7px;
-}
 
 .headline{
     font-size:32px;
@@ -403,6 +471,67 @@ def filter_nav(active_slug):
     return "".join(links)
 
 
+
+def signup_panel():
+    return """
+    <section class="signup">
+      <h2>Get CouncilWatch updates</h2>
+
+      <p class="signup-copy">
+        Get new South Orange County local-government
+        coverage and CouncilWatch updates by email.
+      </p>
+
+      <form
+        class="signup-form"
+        action="https://buttondown.com/api/emails/embed-subscribe/CouncilWatch"
+        method="post"
+      >
+        <input
+          type="email"
+          name="email"
+          placeholder="Your email address"
+          autocomplete="email"
+          aria-label="Email address"
+          required
+        >
+
+        <input
+          type="hidden"
+          name="embed"
+          value="1"
+        >
+
+        <input
+          type="hidden"
+          name="utm_source"
+          value="councilwatch"
+        >
+
+        <input
+          type="hidden"
+          name="utm_medium"
+          value="website"
+        >
+
+        <input
+          type="hidden"
+          name="utm_campaign"
+          value="site_signup"
+        >
+
+        <button type="submit">
+          Subscribe
+        </button>
+      </form>
+
+      <div class="signup-small">
+        Subscribe with your email address.
+      </div>
+    </section>
+    """
+
+
 def about_panel():
     return """
     <section class="about">
@@ -525,6 +654,7 @@ def home(
               No published coverage for this city yet.
             </div>
             """
+            + signup_panel()
             + about_panel()
         )
 
@@ -533,16 +663,6 @@ def home(
     for article in articles:
         article_id = esc(
             article.get("article_id")
-        )
-
-        assisted = (
-            '<div class="assisted">'
-            'Technology-assisted'
-            '</div>'
-            if article.get(
-                "technology_assisted"
-            )
-            else ""
         )
 
         cards.append(
@@ -557,8 +677,6 @@ def home(
               <div class="date">
                 {esc(format_date(article.get("meeting_date")))}
               </div>
-
-              {assisted}
 
               <div class="headline">
                 {esc(article.get("headline"))}
@@ -575,6 +693,7 @@ def home(
     return shell(
         top
         + "".join(cards)
+        + signup_panel()
         + about_panel()
     )
 
@@ -671,12 +790,6 @@ def article_page(
         {esc(article.get("city_name"))}
       </div>
 
-      {
-        '<div class="assisted">Technology-assisted</div>'
-        if article.get("technology_assisted")
-        else ""
-      }
-
       <h1>
         {esc(article.get("headline"))}
       </h1>
@@ -709,6 +822,8 @@ def article_page(
             or "No source links available."
         }
       </div>
+
+      {signup_panel()}
 
       {technology_note}
 

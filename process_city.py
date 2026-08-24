@@ -22,6 +22,7 @@ from meeting_intelligence import (
     make_comprehensive_source_notes,
     retry_api_call,
 )
+from notifications import notify_ready_for_review
 from settings import (
     DRAFTS,
     WORK,
@@ -689,6 +690,23 @@ def process_city(
             ),
             encoding="utf-8",
         )
+
+        if final_ok:
+            # Notification is intentionally non-blocking.
+            # A notification problem must never make an
+            # otherwise successful meeting-processing job fail.
+            try:
+                notify_ready_for_review(
+                    meeting,
+                    payload,
+                )
+            except Exception as exc:
+                print(
+                    "WARNING: ready-for-review "
+                    "notification failed:",
+                    type(exc).__name__,
+                    exc,
+                )
 
         update_status(
             status,

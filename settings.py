@@ -50,3 +50,16 @@ STORY_MODEL = _first(
     default="gemini-3.1-flash-lite",
 )
 KEEP_MEDIA = os.getenv("KEEP_MEDIA", "").strip().lower() in {"1", "true", "yes"}
+
+NTFY_SERVER = _first(
+    "NTFY_SERVER",
+    default="https://ntfy.sh",
+)
+
+NTFY_TOPIC = _first(
+    "NTFY_TOPIC",
+)
+
+COUNCILWATCH_REVIEW_BASE_URL = _first(
+    "COUNCILWATCH_REVIEW_BASE_URL",
+)
