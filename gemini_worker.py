@@ -197,6 +197,27 @@ because they are not normal article body text.
 Check the draft ONLY against the supplied recording-derived notes and agenda.
 Do not use outside knowledge.
 
+EVIDENCE-SEPARATION RULES:
+- Treat the recording-derived notes and the written agenda as independent
+  evidence streams.
+- The agenda can verify an official council action without overriding a
+  separately attributed statement made during public comment.
+- Similar or overlapping organization names do NOT establish that they are
+  the same organization.
+- Do NOT replace an organization explicitly supported by the source notes
+  with a similarly named organization from the agenda merely because the
+  agenda contains the latter.
+- When a draft distinguishes an official agenda action from a separate
+  public-comment claim, audit each clause against its own supporting evidence.
+- If public-comment wording is directly supported by the recording-derived
+  notes, it is not an error merely because the agenda uses a different
+  organization name elsewhere.
+- If the sources are genuinely ambiguous, prefer neutral/general wording
+  rather than canonicalizing one organization into another.
+- Source evidence in an audit issue must describe the supplied evidence
+  accurately. Never claim that the notes say one organization when the notes
+  explicitly name another.
+
 CITY: {meeting['city_name']}
 MEETING DATE: {meeting.get('meeting_date') or 'unknown'}
 
@@ -314,10 +335,84 @@ DRAFT JSON:
         "key_facts": "\n".join(story.key_facts),
         "verification_notes": "\n".join(story.verification_notes),
     }
+    def _protected_public_comment_entity(issue):
+        """
+        Return a source-supported proper-name phrase when an audit correction
+        tries to overwrite that phrase in attributed public comment.
+
+        This is intentionally narrow. It does not decide whether an article
+        claim is true in general; it only prevents the auditor from replacing
+        an entity that is explicitly present in the recording-derived notes
+        with a different agenda entity.
+        """
+        import re as _re
+
+        draft_text = issue.draft_text or ""
+        low = draft_text.lower()
+
+        if not any(
+            marker in low
+            for marker in ("speaker", "public comment", "resident")
+        ):
+            return ""
+
+        def _norm(value):
+            value = (value or "").replace(chr(8217), "'")
+
+            # Source notes may contain Markdown emphasis around only part of
+            # an entity name, e.g. **Orange County League** of Cities.
+            # Strip presentation markup before doing evidence comparisons.
+            value = value.replace("*", "").replace("`", "")
+
+            value = _re.sub(r"\s+", " ", value)
+            return value.strip().lower()
+
+        notes_norm = _norm(notes)
+        evidence_norm = _norm(issue.source_evidence)
+        correction_norm = _norm(issue.correction)
+
+        # Find multi-word proper-name phrases such as:
+        # Orange County League of Cities
+        proper_name_pattern = (
+            r"\b[A-Z][A-Za-z0-9&./'()-]*"
+            r"(?:\s+(?:[A-Z][A-Za-z0-9&./'()-]*|of|the|and)){2,}\b"
+        )
+
+        for phrase in _re.findall(proper_name_pattern, draft_text):
+            meaningful_words = [
+                word
+                for word in phrase.split()
+                if word.lower() not in {"of", "the", "and"}
+            ]
+
+            if len(meaningful_words) < 2:
+                continue
+
+            phrase_norm = _norm(phrase)
+
+            if (
+                phrase_norm in notes_norm
+                and phrase_norm in evidence_norm
+                and phrase_norm not in correction_norm
+            ):
+                return phrase
+
+        return ""
+
     valid_issues = []
     for issue in result.issues:
         haystack = fields.get(issue.field, "")
         if issue.draft_text and issue.draft_text in haystack:
+            protected_entity = _protected_public_comment_entity(issue)
+
+            if protected_entity:
+                print(
+                    "    audit guard: dropped attempted source-note entity "
+                    f"overwrite: {protected_entity!r}",
+                    flush=True,
+                )
+                continue
+
             valid_issues.append(issue)
 
     result.issues = valid_issues
