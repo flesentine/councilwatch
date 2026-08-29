@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 import urllib.error
@@ -278,6 +279,13 @@ def newsletter_subject(
 
 
 def newsletter_body(data):
+    """
+    Build Buttondown rich HTML.
+
+    We explicitly select Buttondown's fancy editor mode so
+    Markdown is never shown literally in the rendered email.
+    """
+
     dek = str(
         data.get("dek") or ""
     ).strip()
@@ -296,11 +304,6 @@ def newsletter_body(data):
         if str(p).strip()
     ]
 
-    lines = []
-
-    # Buttondown already displays the email subject as the
-    # newsletter title, so do not repeat the article headline
-    # as a second giant H1 inside the email body.
     meta = " · ".join(
         x
         for x in (
@@ -310,23 +313,30 @@ def newsletter_body(data):
         if x
     )
 
+    parts = [
+        "<!-- buttondown-editor-mode: fancy -->",
+    ]
+
     if meta:
-        lines.extend([
-            f"**{meta}**",
-            "",
-        ])
+        parts.append(
+            "<p><strong>"
+            + html.escape(meta)
+            + "</strong></p>"
+        )
 
     if dek:
-        lines.extend([
-            f"*{dek}*",
-            "",
-        ])
+        parts.append(
+            "<p><em>"
+            + html.escape(dek)
+            + "</em></p>"
+        )
 
     for paragraph in body:
-        lines.extend([
-            paragraph,
-            "",
-        ])
+        parts.append(
+            "<p>"
+            + html.escape(paragraph)
+            + "</p>"
+        )
 
     sources = []
 
@@ -343,35 +353,44 @@ def newsletter_body(data):
             ("http://", "https://")
         ):
             sources.append(
-                f"- [{label}]({url})"
+                '<li><a href="'
+                + html.escape(
+                    url,
+                    quote=True,
+                )
+                + '">'
+                + html.escape(label)
+                + "</a></li>"
             )
 
     if sources:
-        lines.extend([
-            "## Official sources",
-            "",
+        parts.extend([
+            "<hr>",
+            "<h2>Official sources</h2>",
+            "<ul>",
             *sources,
-            "",
+            "</ul>",
         ])
 
-    lines.extend([
-        "---",
-        "",
+    parts.extend([
+        "<hr>",
         (
+            "<p><small>"
             "This report was prepared using "
             "technology-assisted analysis of official "
             "public meeting materials and was reviewed "
             "before publication."
+            "</small></p>"
         ),
-        "",
         (
+            "<p><small>"
             "CouncilWatch covers local government "
             "across South Orange County."
+            "</small></p>"
         ),
     ])
 
-    return "\n".join(lines).strip() + "\n"
-
+    return "\n".join(parts)
 
 def _request(
     method,
