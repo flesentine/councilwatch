@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -8,6 +9,44 @@ from datetime import datetime, timezone
 from settings import (
     BUTTONDOWN_API_BASE,
     BUTTONDOWN_API_KEY,
+)
+
+
+MAX_NEWSLETTER_SUBJECT = 68
+
+CITY_SUBJECT_NAMES = {
+    "rsm": "RSM",
+    "aliso-viejo": "Aliso Viejo",
+    "mission-viejo": "Mission Viejo",
+    "lake-forest": "Lake Forest",
+    "laguna-niguel": "Laguna Niguel",
+}
+
+SUBJECT_REPLACEMENTS = (
+    (
+        r"\bgeotechnical engineering agreements\b",
+        "Geotechnical Contracts",
+    ),
+    (
+        r"\bprofessional services agreements\b",
+        "Contracts",
+    ),
+    (
+        r"\bschool zone speed limits\b",
+        "School Zones",
+    ),
+    (
+        r"\bschool zone speed limit\b",
+        "School Zones",
+    ),
+    (
+        r"\btraffic signal materials\b",
+        "Traffic Signals",
+    ),
+    (
+        r"\bagenda management software\b",
+        "Agenda Software",
+    ),
 )
 
 
@@ -39,11 +78,206 @@ def pretty_date(value):
         return text
 
 
-def newsletter_body(data):
-    headline = str(
-        data.get("headline") or ""
+def _clean_subject_text(value):
+    text = re.sub(
+        r"\s+",
+        " ",
+        str(value or "").strip(),
+    )
+
+    return text.rstrip(". ")
+
+
+def _subject_city(data):
+    slug = str(
+        data.get("city_slug") or ""
     ).strip()
 
+    return (
+        CITY_SUBJECT_NAMES.get(slug)
+        or str(data.get("city_name") or "").strip()
+        or "CouncilWatch"
+    )
+
+
+def _strip_city_council_prefix(
+    headline,
+    data,
+    short_city,
+):
+    city = str(
+        data.get("city_name") or ""
+    ).strip()
+
+    prefixes = [
+        f"{city} City Council " if city else "",
+        f"{city} Council " if city else "",
+        (
+            f"{short_city} City Council "
+            if short_city
+            else ""
+        ),
+        (
+            f"{short_city} Council "
+            if short_city
+            else ""
+        ),
+        "City Council ",
+    ]
+
+    for prefix in prefixes:
+        if (
+            prefix
+            and headline.lower().startswith(
+                prefix.lower()
+            )
+        ):
+            return headline[
+                len(prefix):
+            ].strip()
+
+    return headline
+
+
+def _compress_subject_phrases(value):
+    text = value
+
+    for pattern, replacement in SUBJECT_REPLACEMENTS:
+        text = re.sub(
+            pattern,
+            replacement,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    text = re.sub(
+        r"\s+and\s+",
+        " & ",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    return _clean_subject_text(text)
+
+
+def _trim_subject_core(
+    core,
+    budget,
+):
+    if len(core) <= budget:
+        return core
+
+    boundaries = [
+        match.start()
+        for match in re.finditer(
+            r",\s+|\s+&\s+|\s+-\s+",
+            core,
+        )
+        if match.start() <= budget
+    ]
+
+    if boundaries:
+        boundary = boundaries[-1]
+        candidate = core[
+            :boundary
+        ].rstrip(" ,&-")
+
+        if len(candidate) >= min(
+            34,
+            max(20, budget // 2),
+        ):
+            return candidate
+
+    if budget <= 4:
+        return core[:budget]
+
+    cut = core[: budget - 3].rstrip()
+
+    if " " in cut:
+        cut = cut.rsplit(
+            " ",
+            1,
+        )[0]
+
+    return cut.rstrip(" ,&-") + "..."
+
+
+def newsletter_subject(
+    data,
+    max_length=MAX_NEWSLETTER_SUBJECT,
+):
+    """
+    Build a concise email subject from the article headline.
+
+    The website headline remains untouched. Only the email
+    subject is shortened, with a hard length cap so common
+    mail clients and Buttondown are less likely to truncate it.
+    """
+
+    headline = _clean_subject_text(
+        data.get("headline")
+    )
+
+    if not headline:
+        return "CouncilWatch update"
+
+    short_city = _subject_city(data)
+
+    core = _strip_city_council_prefix(
+        headline,
+        data,
+        short_city,
+    )
+
+    core = _compress_subject_phrases(
+        core
+    )
+
+    prefix = (
+        f"{short_city}: "
+        if short_city
+        else ""
+    )
+
+    candidate = prefix + core
+
+    if len(candidate) <= max_length:
+        return candidate
+
+    # If the headline is still long, remove a generic action
+    # verb before dropping substantive topics.
+    shorter_core = re.sub(
+        (
+            r"^(?:Approves|Reviews|Awards|Adopts|"
+            r"Authorizes|Considers|Endorses|Accepts|"
+            r"Receives|Discusses|Votes to|Moves to)\s+"
+        ),
+        "",
+        core,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    candidate = prefix + shorter_core
+
+    if len(candidate) <= max_length:
+        return candidate
+
+    budget = max(
+        1,
+        max_length - len(prefix),
+    )
+
+    return (
+        prefix
+        + _trim_subject_core(
+            shorter_core,
+            budget,
+        )
+    )[:max_length]
+
+
+def newsletter_body(data):
     dek = str(
         data.get("dek") or ""
     ).strip()
@@ -64,18 +298,9 @@ def newsletter_body(data):
 
     lines = []
 
-    if headline:
-        lines.extend([
-            f"# {headline}",
-            "",
-        ])
-
-    if dek:
-        lines.extend([
-            f"*{dek}*",
-            "",
-        ])
-
+    # Buttondown already displays the email subject as the
+    # newsletter title, so do not repeat the article headline
+    # as a second giant H1 inside the email body.
     meta = " · ".join(
         x
         for x in (
@@ -88,6 +313,12 @@ def newsletter_body(data):
     if meta:
         lines.extend([
             f"**{meta}**",
+            "",
+        ])
+
+    if dek:
+        lines.extend([
+            f"*{dek}*",
             "",
         ])
 
@@ -246,14 +477,17 @@ def ensure_buttondown_draft(
             "updated": False,
             "id": existing_id,
             "status": "draft",
+            "subject": data.get(
+                "newsletter_draft_subject"
+            ),
             "message":
                 "Existing Buttondown draft is current.",
         }
 
+    subject = newsletter_subject(data)
+
     payload = {
-        "subject": str(
-            data.get("headline") or ""
-        ).strip(),
+        "subject": subject,
         "body": newsletter_body(data),
         "status": "draft",
     }
@@ -305,6 +539,10 @@ def ensure_buttondown_draft(
         ] = "draft"
 
         data[
+            "newsletter_draft_subject"
+        ] = subject
+
+        data[
             "newsletter_draft_last_attempt_at"
         ] = attempt
 
@@ -325,6 +563,8 @@ def ensure_buttondown_draft(
             "status":
                 result.get("status")
                 or "draft",
+            "subject": subject,
+            "subject_length": len(subject),
         }
 
     except Exception as exc:
