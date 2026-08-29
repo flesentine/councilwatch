@@ -63,3 +63,13 @@ NTFY_TOPIC = _first(
 COUNCILWATCH_REVIEW_BASE_URL = _first(
     "COUNCILWATCH_REVIEW_BASE_URL",
 )
+
+
+BUTTONDOWN_API_KEY = _first(
+    "BUTTONDOWN_API_KEY",
+)
+
+BUTTONDOWN_API_BASE = _first(
+    "BUTTONDOWN_API_BASE",
+    default="https://api.buttondown.com/v1",
+)

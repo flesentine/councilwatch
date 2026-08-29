@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from agenda import agenda_text
 from gemini_worker import StoryDraft, audit_story
 from meeting_intelligence import audit_verification_context
+from newsletter import ensure_buttondown_draft
 from publishing import (
     publish_copy,
     remove_published_copy,
@@ -654,6 +655,60 @@ def story(slug: str, external_id: str):
         publication_label = "Not published"
         publish_controls = ""
 
+    newsletter_id = str(
+        target.get(
+            "newsletter_draft_id"
+        )
+        or ""
+    ).strip()
+
+    newsletter_error = str(
+        target.get(
+            "newsletter_draft_error"
+        )
+        or ""
+    ).strip()
+
+    newsletter_revision = int(
+        target.get(
+            "newsletter_draft_revision",
+            0,
+        )
+        or 0
+    )
+
+    current_revision = int(
+        target.get(
+            "revision",
+            1,
+        )
+        or 1
+    )
+
+    if (
+        newsletter_id
+        and newsletter_revision
+        == current_revision
+    ):
+        newsletter_label = (
+            "Newsletter draft ready"
+        )
+
+    elif newsletter_error:
+        newsletter_label = (
+            "Newsletter draft failed"
+        )
+
+    elif is_published:
+        newsletter_label = (
+            "Newsletter draft pending"
+        )
+
+    else:
+        newsletter_label = (
+            "Newsletter not created"
+        )
+
     current_note = target.get(
         "review_note",
         "",
@@ -666,6 +721,11 @@ def story(slug: str, external_id: str):
       <div>
         Current status:
         <strong>{esc(review_label(rs))}</strong>
+      </div>
+
+      <div style="margin-top:6px">
+        Newsletter:
+        <strong>{esc(newsletter_label)}</strong>
       </div>
 
       <div style="margin-top:12px">
@@ -1441,6 +1501,30 @@ def publish_story(
         target
     )
 
+    # Newsletter drafting is deliberately non-blocking.
+    # A Buttondown outage must never undo or prevent
+    # an otherwise valid CouncilWatch publication.
+    try:
+        newsletter_result = ensure_buttondown_draft(
+            target
+        )
+
+    except Exception as exc:
+        newsletter_result = {
+            "ok": False,
+            "created": False,
+            "updated": False,
+            "error": str(exc),
+        }
+
+        target[
+            "newsletter_draft_error"
+        ] = str(exc)
+
+        target[
+            "newsletter_draft_last_attempt_at"
+        ] = now()
+
     write_json(
         path,
         target,
@@ -1454,6 +1538,8 @@ def publish_story(
             target["published_revision"],
         "local_path":
             str(public_path),
+        "newsletter":
+            newsletter_result,
     }
 
 
