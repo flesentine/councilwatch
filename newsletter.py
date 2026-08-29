@@ -319,17 +319,27 @@ def newsletter_body(data):
 
     if meta:
         parts.append(
-            "<p><strong>"
+            '<p style="margin:0 0 16px;'
+            'color:#777;font-size:14px;'
+            'line-height:1.4;">'
             + html.escape(meta)
-            + "</strong></p>"
+            + "</p>"
         )
 
     if dek:
-        parts.append(
-            "<p><em>"
-            + html.escape(dek)
-            + "</em></p>"
-        )
+        parts.extend([
+            (
+                '<p style="margin:0 0 22px;">'
+                "<em>"
+                + html.escape(dek)
+                + "</em></p>"
+            ),
+            (
+                '<hr style="border:0;'
+                'border-top:1px solid #e5e5e5;'
+                'margin:24px 0;">'
+            ),
+        ])
 
     for paragraph in body:
         parts.append(
