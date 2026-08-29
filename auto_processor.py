@@ -111,7 +111,10 @@ def classify_error(exc, attempts):
 
     api_terms = [
         "429",
+        "500 internal",
         "503",
+        "servererror",
+        "internal error encountered",
         "resource_exhausted",
         "unavailable",
         "high demand",
