@@ -197,6 +197,90 @@ because they are not normal article body text.
 Check the draft ONLY against the supplied recording-derived notes and agenda.
 Do not use outside knowledge.
 
+The supplied source notes may contain a section named
+PUBLISHABLE PERSON NAMES. Treat that list as an absolute
+publication whitelist. A raw transcript or agenda appearance
+does not override the whitelist.
+
+OFFICIAL-AGENDA STRUCTURE AUTHORITY:
+
+- The WRITTEN OFFICIAL AGENDA is authoritative for agenda item
+  numbers, agenda item titles and section placement such as
+  CONSENT CALENDAR, PUBLIC HEARINGS and NEW BUSINESS.
+
+- Recording-derived notes may establish what was said, moved,
+  voted on or discussed, but they MUST NOT override the
+  official agenda's item numbering or section placement.
+
+- If source notes claim that a topic was item 17, item 18 or
+  another number but the official agenda assigns that topic to
+  a different item, THE OFFICIAL AGENDA WINS.
+
+- Never write or accept an audit explanation saying
+  "the agenda lists..." unless the supplied agenda text actually
+  says that.
+
+- A generic Consent Calendar approval cannot establish approval
+  of an item that the official agenda places under PUBLIC
+  HEARINGS or NEW BUSINESS.
+
+- When the recording establishes discussion but does not clearly
+  establish the final disposition of the correctly matched
+  agenda item, use discussed, considered or unclear rather than
+  inferring approval.
+
+CONFLICTED AGENDA-LINKAGE POLICY:
+
+- Sometimes recording-derived notes correctly support that a
+  topic was discussed or considered while incorrectly labeling
+  the agenda item number or agenda section.
+
+- The written official agenda remains authoritative for item
+  number, title and formal section placement.
+
+- HOWEVER, when the verification context explicitly says
+  "Agenda linkage conflict: YES", do not infer that the
+  discussion itself occurred during either the source-note
+  section or the official-agenda section.
+
+- In that situation the REQUIRED conservative reader-facing
+  treatment is neutral wording such as:
+  "The Council discussed zoning and development code
+  amendments."
+
+- Do NOT require "during the Consent Calendar", "during a
+  public hearing", "during new business", or an agenda item
+  number when the action record has an agenda-linkage conflict.
+
+- Neutral wording is not an omission or audit error when it
+  preserves the supported topic and action while avoiding the
+  disputed timing/section relationship.
+
+PUBLIC-COPY ITEM NUMBER POLICY:
+
+- CouncilWatch intentionally omits agenda item numbers from
+  reader-facing headline, dek, body and key facts.
+
+- The absence of an agenda item number is NOT an error.
+
+- Do NOT require or propose adding "Item 21", "Agenda Item 21",
+  or any other agenda number to reader-facing copy.
+
+- When official agenda section context is relevant, use plain
+  reader-facing wording such as:
+  "During a public hearing, the Council discussed..."
+  or
+  "During new business, the Council considered..."
+
+- If the draft correctly identifies the topic, action and
+  official agenda section, do not flag it merely because the
+  agenda item number is omitted.
+
+- If source notes contain an incorrect item-number association
+  but the official agenda establishes the correct section, the
+  official agenda controls. Correct the section relationship,
+  not by inserting an item number into public copy.
+
 EVIDENCE-SEPARATION RULES:
 - Treat the recording-derived notes and the written agenda as independent
   evidence streams.
@@ -242,6 +326,18 @@ does not establish.
 A claim can sound plausible and still be unsupported.
 
 Material errors include:
+- any human name in headline, dek, body or key facts that is not
+  explicitly listed under PUBLISHABLE PERSON NAMES in the
+  supplied verification context. If that list says NONE, no
+  human names may appear in publishable article fields
+- disagreement between headline, dek, body or key facts about
+  the action status of the same agenda item, such as the
+  headline saying "approved" while the body says "discussed"
+- attributing approval of a particular agenda item to a generic
+  Consent Calendar vote when the supplied evidence does not
+  explicitly establish that the item was on that Consent
+  Calendar; this is especially material when the agenda places
+  the item under PUBLIC HEARINGS or NEW BUSINESS
 - unsupported or misspelled names/titles
 - merging two distinct or ambiguously related technologies,
   programs, contracts or council actions into one factual claim
@@ -260,6 +356,13 @@ Material errors include:
   speaker actually said, such as converting a request for
   information or assurances into fear, anxiety, harm, or a
   claimed negative impact
+- a concrete event, allegation, accident, fatality, violation,
+  property condition, date, or similar factual claim that is
+  supported only as something a public commenter asserted but
+  is rewritten as an independently established fact. Preserve
+  attribution with wording such as "a resident said" or
+  "citing..." unless the supplied official material separately
+  establishes the underlying fact
 - unsupported claims that creating a committee itself commits
   city resources, funding, policy adoption or implementation
 - unsupported interpretive claims such as "sets a precedent",
@@ -287,6 +390,11 @@ Minor issues include:
 - imprecise but not materially misleading wording
 - redundant wording
 - supported fact placed awkwardly
+- an opening paragraph followed by a second paragraph that
+  substantially repeats the same council action instead of
+  adding distinct news value
+- generic meeting-recap ledes such as "The City Council met..."
+  when the article can lead directly with the substantive action
 
 Set ok=true when there are NO material errors.
 Minor issues alone do not make ok=false.

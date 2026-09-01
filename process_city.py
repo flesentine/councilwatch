@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,6 +80,976 @@ def update_status(
     write_status(status)
 
 
+def strip_public_agenda_item_numbers(story):
+    """
+    Agenda item numbers are useful internally but are not needed
+    in reader-facing CouncilWatch copy.
+
+    Recording-derived notes can contain mistaken item-number
+    associations. Rather than asking language models to reconcile
+    those numbers repeatedly, remove agenda-number references
+    deterministically from publishable article fields.
+
+    The source-validated action ledger retains official item
+    numbers for internal verification and review.
+    """
+
+    changed = False
+
+    parenthetical = re.compile(
+        r"""
+        \s*
+        \(
+        \s*
+        agenda\s+items?
+        \s+
+        \d+
+        (?:
+            \s*
+            (?:,|and|&|/|-)
+            \s*
+            \d+
+        )*
+        \s*
+        \)
+        """,
+        re.I | re.X,
+    )
+
+    standalone = re.compile(
+        r"""
+        \bagenda\s+items?
+        \s+
+        \d+
+        (?:
+            \s*
+            (?:,|and|&|/|-)
+            \s*
+            \d+
+        )*
+        \b
+        """,
+        re.I | re.X,
+    )
+
+    bare_parenthetical = re.compile(
+        r"""
+        \s*
+        \(
+        \s*
+        items?
+        \s+
+        \d+
+        (?:
+            \s*
+            (?:,|and|&|/|-)
+            \s*
+            \d+
+        )*
+        \s*
+        \)
+        """,
+        re.I | re.X,
+    )
+
+    bare_item = re.compile(
+        r"""
+        \bitems?
+        \s+
+        \d+
+        (?:
+            \s*
+            (?:,|and|&|/|-)
+            \s*
+            \d+
+        )*
+        \b
+        """,
+        re.I | re.X,
+    )
+
+    def scrub(value):
+        value = str(value or "")
+
+        cleaned = parenthetical.sub(
+            "",
+            value,
+        )
+
+        cleaned = standalone.sub(
+            "",
+            cleaned,
+        )
+
+        cleaned = bare_parenthetical.sub(
+            "",
+            cleaned,
+        )
+
+        cleaned = bare_item.sub(
+            "",
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"\s+([,.;:])",
+            r"\1",
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"[ \t]{2,}",
+            " ",
+            cleaned,
+        )
+
+        return cleaned.strip()
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        scrub(paragraph)
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(fact)
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+def enforce_public_action_constraints(
+    story,
+    intelligence,
+):
+    """
+    Prevent public copy from attaching an officially
+    non-consent topic to the Consent Calendar.
+
+    Official agenda section placement comes from the
+    source-validated action ledger.
+
+    This is deterministic and intentionally narrow.
+    """
+
+    changed = False
+
+    non_consent_topics = []
+
+    for action in intelligence.get(
+        "action_ledger",
+        [],
+    ):
+        section = str(
+            action.get(
+                "agenda_section",
+                "",
+            )
+        ).strip().upper()
+
+        topic = str(
+            action.get(
+                "topic",
+                "",
+            )
+        ).strip()
+
+        if (
+            section
+            and section != "CONSENT CALENDAR"
+            and topic
+        ):
+            non_consent_topics.append(
+                topic
+            )
+
+    def words(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").lower(),
+            )
+            if len(word) >= 4
+            and word not in {
+                "with",
+                "from",
+                "that",
+                "this",
+                "city",
+                "council",
+                "calendar",
+                "consent",
+                "item",
+                "items",
+            }
+        }
+
+    topic_word_sets = [
+        words(topic)
+        for topic in non_consent_topics
+    ]
+
+    def links_non_consent_to_consent(
+        value,
+    ):
+        low = str(
+            value or ""
+        ).lower()
+
+        if "consent calendar" not in low:
+            return False
+
+        value_words = words(value)
+
+        for topic_words in topic_word_sets:
+            if (
+                len(
+                    value_words
+                    & topic_words
+                )
+                >= 2
+            ):
+                return True
+
+        return False
+
+    def scrub(value):
+        value = str(value or "")
+
+        if not links_non_consent_to_consent(
+            value
+        ):
+            return value
+
+        cleaned = value
+
+        # Example:
+        # "Consent Calendar, which included zoning...,"
+        cleaned = re.sub(
+            r",\s*which\s+included\b[^.]*",
+            "",
+            cleaned,
+            flags=re.I,
+        )
+
+        # Example:
+        # "Consent Calendar, including zoning..., was approved"
+        cleaned = re.sub(
+            r",\s*including\b[^,.;]*,\s*",
+            " ",
+            cleaned,
+            flags=re.I,
+        )
+
+        cleaned = re.sub(
+            r"\s+([,.;:])",
+            r"\1",
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"[ \t]{2,}",
+            " ",
+            cleaned,
+        )
+
+        cleaned = cleaned.strip()
+
+        # If the semantic contamination still survives,
+        # fail closed instead of publishing the relationship.
+        if links_non_consent_to_consent(
+            cleaned
+        ):
+            return ""
+
+        return cleaned
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        # An empty result is intentional fail-closed behavior.
+        # The subsequent audit must rebuild a supported headline.
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        # As with the headline, blank is safer than retaining a
+        # relationship the deterministic guard rejected.
+        story.dek = new_dek
+        changed = True
+
+    new_body = []
+
+    for paragraph in story.body:
+        cleaned = scrub(
+            paragraph
+        )
+
+        if cleaned:
+            new_body.append(
+                cleaned
+            )
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = []
+
+    for fact in story.key_facts:
+        cleaned = scrub(
+            fact
+        )
+
+        if cleaned:
+            new_key_facts.append(
+                cleaned
+            )
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+def normalize_validated_action_language(
+    story,
+    intelligence,
+):
+    """
+    Prevent reader-facing copy from strengthening a validated
+    REQUESTED STAFF FOLLOW-UP into a direction, order,
+    instruction or investigation mandate.
+
+    The action ledger controls the permitted action strength.
+    """
+
+    actions = intelligence.get(
+        "action_ledger",
+        [],
+    )
+
+    requested_actions = [
+        action
+        for action in actions
+        if (
+            str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            == "requested staff follow-up"
+            and action.get("validated") is True
+        )
+    ]
+
+    if not requested_actions:
+        return False
+
+    stronger_actions = [
+        action
+        for action in actions
+        if (
+            str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            in {
+                "directed",
+                "ordered",
+                "instructed",
+            }
+            and action.get("validated") is True
+        )
+    ]
+
+    stopwords = {
+        "councilmember",
+        "council",
+        "staff",
+        "requested",
+        "request",
+        "follow",
+        "regarding",
+        "specific",
+        "concerns",
+        "concern",
+        "raised",
+        "during",
+        "public",
+        "comments",
+        "comment",
+        "city",
+
+        # Action-strength words are not topical evidence.
+        # Without excluding them, two unrelated actions can
+        # appear related merely because both say "directed",
+        # "ordered" or "instructed".
+        "directed",
+        "directing",
+        "ordered",
+        "ordering",
+        "instructed",
+        "instructing",
+    }
+
+    def tokens(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").lower(),
+            )
+            if (
+                len(word) >= 4
+                and word not in stopwords
+            )
+        }
+
+    requested_cues = set()
+
+    for action in requested_actions:
+        requested_cues |= tokens(
+            str(
+                action.get(
+                    "topic",
+                    "",
+                )
+            )
+            + " "
+            + str(
+                action.get(
+                    "evidence_quote",
+                    "",
+                )
+            )
+        )
+
+    stronger_cue_sets = []
+
+    for action in stronger_actions:
+        stronger_cue_sets.append(
+            tokens(
+                str(
+                    action.get(
+                        "topic",
+                        "",
+                    )
+                )
+                + " "
+                + str(
+                    action.get(
+                        "evidence_quote",
+                        "",
+                    )
+                )
+            )
+        )
+
+    strong_pattern = re.compile(
+        r"\b(?:"
+        r"directed|directing|"
+        r"ordered|ordering|"
+        r"instructed|instructing"
+        r")\s+(?:city\s+)?staff\b",
+        re.I,
+    )
+
+    replacements = [
+        (
+            re.compile(
+                r"\bdirected city staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requested that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bdirected staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requested staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\bdirected city staff to follow up on\b",
+                re.I,
+            ),
+            "requested that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bdirected staff to follow up on\b",
+                re.I,
+            ),
+            "requested staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\bdirected city staff to provide "
+                r"(?:a\s+)?follow-up (?:report\s+)?"
+                r"(?:on|regarding)\b",
+                re.I,
+            ),
+            "requested that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bdirected staff to provide "
+                r"(?:a\s+)?follow-up (?:report\s+)?"
+                r"(?:on|regarding)\b",
+                re.I,
+            ),
+            "requested staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\bdirecting city staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requesting that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bdirecting staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requesting staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\bdirecting city staff to follow up on\b",
+                re.I,
+            ),
+            "requesting that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bdirecting staff to follow up on\b",
+                re.I,
+            ),
+            "requesting staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\bdirecting city staff to provide "
+                r"(?:a\s+)?follow-up (?:report\s+)?"
+                r"(?:on|regarding)\b",
+                re.I,
+            ),
+            "requesting that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bdirecting staff to provide "
+                r"(?:a\s+)?follow-up (?:report\s+)?"
+                r"(?:on|regarding)\b",
+                re.I,
+            ),
+            "requesting staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\bordered city staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requested that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\bordered staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requested staff follow-up on",
+        ),
+        (
+            re.compile(
+                r"\binstructed city staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requested that city staff follow up on",
+        ),
+        (
+            re.compile(
+                r"\binstructed staff to "
+                r"(?:investigate|address)\b",
+                re.I,
+            ),
+            "requested staff follow-up on",
+        ),
+    ]
+
+    def normalize(value):
+        value = str(value or "")
+
+        if not strong_pattern.search(
+            value
+        ):
+            return value
+
+        value_tokens = tokens(
+            value
+        )
+
+        # Require at least one meaningful connection to a
+        # validated follow-up topic. The previous >=2 rule was
+        # too strict for concise deks and key facts.
+        if (
+            requested_cues
+            and not (
+                value_tokens
+                & requested_cues
+            )
+        ):
+            return value
+
+        # Preserve stronger wording only when this exact piece
+        # of copy also matches an independently validated
+        # stronger action.
+        for cue_set in stronger_cue_sets:
+            if (
+                cue_set
+                and len(
+                    value_tokens
+                    & cue_set
+                ) >= 2
+            ):
+                return value
+
+        cleaned = value
+
+        for pattern, replacement in replacements:
+            cleaned = pattern.sub(
+                replacement,
+                cleaned,
+            )
+
+        return cleaned
+
+    changed = False
+
+    new_headline = normalize(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = normalize(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        normalize(paragraph)
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        normalize(fact)
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+def restore_required_topics_from_key_facts(
+    story,
+    intelligence,
+):
+    """
+    If an audit correction removes a MUST INCLUDE topic from the
+    body, restore an already-generated matching key fact as a
+    concise paragraph.
+
+    The resulting body is audited again normally.
+    """
+
+    stopwords = {
+        "and",
+        "the",
+        "for",
+        "with",
+        "from",
+        "into",
+        "city",
+        "council",
+        "annual",
+        "program",
+        "update",
+        "concerns",
+        "concern",
+        "amendment",
+        "amendments",
+    }
+
+    def words(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").lower(),
+            )
+            if (
+                len(word) >= 4
+                and word not in stopwords
+            )
+        }
+
+    must_items = sorted(
+        [
+            item
+            for item in intelligence.get(
+                "coverage_items",
+                [],
+            )
+            if item.get("must_include")
+        ],
+        key=lambda item: int(
+            item.get("rank") or 999
+        ),
+    )
+
+    changed = False
+
+    for item in must_items:
+        topic = str(
+            item.get(
+                "topic",
+                "",
+            )
+        ).strip()
+
+        topic_words = words(
+            topic
+        )
+
+        if len(topic_words) < 2:
+            continue
+
+        body_words = words(
+            "\n".join(
+                story.body
+            )
+        )
+
+        if (
+            len(
+                topic_words
+                & body_words
+            )
+            >= 2
+        ):
+            continue
+
+        best_fact = ""
+        best_score = 0
+
+        for fact in story.key_facts:
+            score = len(
+                topic_words
+                & words(fact)
+            )
+
+            if score > best_score:
+                best_score = score
+                best_fact = fact
+
+        restore_text = ""
+
+        if (
+            best_fact
+            and best_score >= 2
+            and best_fact not in story.body
+        ):
+            restore_text = best_fact
+
+        # If audit cleanup also removed the matching key fact,
+        # use only a validated lower-level action from the
+        # source-backed action ledger.
+        if not restore_text:
+            for action in intelligence.get(
+                "action_ledger",
+                [],
+            ):
+                if action.get(
+                    "validated"
+                ) is not True:
+                    continue
+
+                action_topic = str(
+                    action.get(
+                        "topic",
+                        "",
+                    )
+                ).strip()
+
+                if (
+                    len(
+                        topic_words
+                        & words(action_topic)
+                    )
+                    < 2
+                ):
+                    continue
+
+                action_status = str(
+                    action.get(
+                        "action_status",
+                        "",
+                    )
+                ).strip().lower()
+
+                agenda_section = str(
+                    action.get(
+                        "agenda_section",
+                        "",
+                    )
+                ).strip().upper()
+
+                if action.get(
+                    "agenda_linkage_conflict"
+                ):
+                    agenda_section = ""
+
+                readable_topic = (
+                    action_topic[:1].lower()
+                    + action_topic[1:]
+                )
+
+                if action_status == "discussed":
+                    if agenda_section == "PUBLIC HEARINGS":
+                        restore_text = (
+                            "During a public hearing, "
+                            "the Council discussed "
+                            + readable_topic
+                            + "."
+                        )
+
+                    elif agenda_section == "NEW BUSINESS":
+                        restore_text = (
+                            "During new business, "
+                            "the Council discussed "
+                            + readable_topic
+                            + "."
+                        )
+
+                    else:
+                        restore_text = (
+                            "The Council discussed "
+                            + readable_topic
+                            + "."
+                        )
+
+                elif action_status == "considered":
+                    if agenda_section == "PUBLIC HEARINGS":
+                        restore_text = (
+                            "During a public hearing, "
+                            "the Council considered "
+                            + readable_topic
+                            + "."
+                        )
+
+                    elif agenda_section == "NEW BUSINESS":
+                        restore_text = (
+                            "During new business, "
+                            "the Council considered "
+                            + readable_topic
+                            + "."
+                        )
+
+                    else:
+                        restore_text = (
+                            "The Council considered "
+                            + readable_topic
+                            + "."
+                        )
+
+                if restore_text:
+                    break
+
+        if not restore_text:
+            continue
+
+        rank = int(
+            item.get("rank")
+            or 999
+        )
+
+        if rank == 1:
+            insert_at = min(
+                1,
+                len(story.body),
+            )
+        else:
+            insert_at = min(
+                max(rank - 1, 1),
+                len(story.body),
+            )
+
+        story.body.insert(
+            insert_at,
+            restore_text,
+        )
+
+        changed = True
+
+    return changed
+
+
 def apply_audit_corrections(story, audit):
     changed = False
 
@@ -111,6 +1082,11 @@ def apply_audit_corrections(story, audit):
                 audit.corrected_verification_notes
             )
             changed = True
+
+    if strip_public_agenda_item_numbers(
+        story
+    ):
+        changed = True
 
     return changed
 
@@ -510,6 +1486,37 @@ def process_city(
             intelligence,
         )
 
+        public_guard_changed = False
+
+        if strip_public_agenda_item_numbers(
+            story
+        ):
+            public_guard_changed = True
+
+        if enforce_public_action_constraints(
+            story,
+            intelligence,
+        ):
+            public_guard_changed = True
+
+        if normalize_validated_action_language(
+            story,
+            intelligence,
+        ):
+            public_guard_changed = True
+
+        if restore_required_topics_from_key_facts(
+            story,
+            intelligence,
+        ):
+            public_guard_changed = True
+
+        if public_guard_changed:
+            print(
+                "Applied deterministic "
+                "reader-facing safety guards."
+            )
+
         # --------------------------------------------------
         # AUDIT / CORRECT LOOP
         # --------------------------------------------------
@@ -571,6 +1578,24 @@ def process_city(
                     audit,
                 )
 
+                if enforce_public_action_constraints(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if normalize_validated_action_language(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if restore_required_topics_from_key_facts(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
             if changed:
                 print(
                     "  Corrections applied; "
@@ -589,7 +1614,9 @@ def process_city(
         # Always audit exactly the text that will be saved.
         # If the final audit finds a usable correction, including
         # a minor one, apply it and audit the corrected copy again.
-        for final_pass in range(1, 3):
+        final_story_was_changed = False
+
+        for final_pass in range(1, 5):
             print()
             print(
                 "Running FINAL audit on saved copy "
@@ -617,13 +1644,35 @@ def process_city(
                 if issue.severity.lower() == "material"
             ]
 
+            final_story_was_changed = False
+
             if valid_issues:
                 changed = apply_audit_corrections(
                     story,
                     final_audit,
                 )
 
+                if enforce_public_action_constraints(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if normalize_validated_action_language(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if restore_required_topics_from_key_facts(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
                 if changed:
+                    final_story_was_changed = True
+
                     print(
                         "  Final-audit correction applied; "
                         "auditing corrected copy again."
@@ -631,6 +1680,53 @@ def process_city(
                     continue
 
             break
+
+        # If the LAST permitted correction pass changed the
+        # article, the audit result above describes the older
+        # copy rather than the text now held in `story`.
+        #
+        # Fail closed unless the exact final text receives one
+        # more read-only audit.
+        if final_story_was_changed:
+            print()
+            print(
+                "Last final-audit pass changed the story."
+            )
+            print(
+                "Auditing exact saved copy one more time..."
+            )
+
+            final_audit = retry_api_call(
+                "Exact saved-copy audit",
+                lambda: audit_story(
+                    meeting,
+                    audit_notes,
+                    agenda,
+                    story,
+                ),
+            )
+
+            valid_issues = valid_audit_issues(
+                story,
+                final_audit,
+            )
+
+            material = [
+                issue
+                for issue in valid_issues
+                if issue.severity.lower()
+                == "material"
+            ]
+
+            print(
+                "  exact-copy valid issues:",
+                len(valid_issues),
+            )
+
+            print(
+                "  exact-copy material:",
+                len(material),
+            )
 
         final_ok = len(material) == 0
 
@@ -655,6 +1751,11 @@ def process_city(
             "entity_verification":
                 intelligence.get(
                     "entities",
+                    [],
+                ),
+            "action_ledger":
+                intelligence.get(
+                    "action_ledger",
                     [],
                 ),
             "coverage_plan":

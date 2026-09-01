@@ -62,7 +62,997 @@ class CoveragePlan(BaseModel):
     editorial_summary: str = ""
 
 
-def retry_api_call(label, fn, max_attempts=2):
+class ActionRecord(BaseModel):
+    topic: str
+    item_number: str = ""
+    action_status: str
+    evidence_source: str
+    evidence_quote: str
+
+
+class ActionLedger(BaseModel):
+    items: list[ActionRecord]
+
+
+ACTION_FORMAL_STATUSES = {
+    "approved",
+    "adopted",
+    "authorized",
+    "awarded",
+    "directed",
+    "rejected",
+    "denied",
+    "appointed",
+    "accepted",
+    "passed",
+}
+
+
+ACTION_EVIDENCE_TERMS = {
+    "approve",
+    "approved",
+    "approval",
+    "adopt",
+    "adopted",
+    "authorize",
+    "authorized",
+    "award",
+    "awarded",
+    "directed",
+    "reject",
+    "rejected",
+    "deny",
+    "denied",
+    "appoint",
+    "appointed",
+    "accepted",
+    "passed",
+    "motion",
+    "moved",
+    "vote",
+    "voted",
+    "carried",
+}
+
+
+ACTION_STOPWORDS = {
+    "and",
+    "the",
+    "for",
+    "with",
+    "from",
+    "into",
+    "city",
+    "council",
+    "program",
+    "annual",
+    "update",
+    "amendment",
+    "amendments",
+    "item",
+}
+
+
+AGENDA_SECTION_NAMES = {
+    "CONSENT CALENDAR",
+    "PUBLIC HEARINGS",
+    "NEW BUSINESS",
+    "PRESENTATIONS",
+    "PUBLIC COMMENTS",
+    "CLOSED SESSION",
+    "OCSD PUBLIC SAFETY UPDATE",
+    "OCFA PUBLIC SAFETY UPDATES",
+    "CITY MANAGER REPORTS",
+    "CITY ATTORNEY REPORTS",
+    "COUNCIL MEMBER COMMENTS AND ACTIONS",
+    "MAYOR'S, COMMISSION, COMMITTEE REPORTS AND ACTIONS",
+}
+
+
+def parse_agenda_structure(agenda):
+    """
+    Deterministically extract numbered agenda items and their
+    official sections.
+
+    The official agenda, not transcript-derived notes, controls
+    item numbering, item titles and section placement.
+    """
+
+    items = []
+    current_section = ""
+
+    for raw_line in str(
+        agenda or ""
+    ).splitlines():
+
+        line = re.sub(
+            r"\s+",
+            " ",
+            raw_line.strip(),
+        )
+
+        if not line:
+            continue
+
+        upper = (
+            line.replace(
+                "\u2019",
+                "'",
+            )
+            .replace(
+                "\u2018",
+                "'",
+            )
+            .upper()
+        )
+
+        if upper in AGENDA_SECTION_NAMES:
+            current_section = upper
+            continue
+
+        match = re.match(
+            r"^(\d+)\.\s+(.+)$",
+            line,
+        )
+
+        if not match:
+            continue
+
+        items.append(
+            {
+                "item_number":
+                    match.group(1),
+                "section":
+                    current_section,
+                "title":
+                    match.group(2).strip(),
+            }
+        )
+
+    return items
+
+
+def _agenda_match_score(
+    topic,
+    agenda_title,
+):
+    return len(
+        _action_words(topic)
+        & _action_words(agenda_title)
+    )
+
+
+def _resolve_agenda_item(
+    topic,
+    proposed_item_number,
+    agenda_items,
+):
+    """
+    Resolve a model-proposed item number against the actual
+    official agenda.
+
+    A proposed number is accepted only when its official title
+    actually matches the topic. Otherwise we search the official
+    agenda for the best topic match.
+    """
+
+    proposed = str(
+        proposed_item_number or ""
+    ).strip()
+
+    if proposed:
+        for item in agenda_items:
+            if (
+                item["item_number"]
+                == proposed
+                and _agenda_match_score(
+                    topic,
+                    item["title"],
+                ) >= 2
+            ):
+                return item
+
+    best = None
+    best_score = 0
+
+    for item in agenda_items:
+        score = _agenda_match_score(
+            topic,
+            item["title"],
+        )
+
+        if score > best_score:
+            best = item
+            best_score = score
+
+    if best_score >= 2:
+        return best
+
+    return None
+
+
+def _action_norm(value):
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value or "").strip().lower(),
+    )
+
+
+def _action_word_root(word):
+    """
+    Conservative normalization used only for topic/evidence
+    matching.
+
+    This is not text rewriting. It lets obvious variants such as
+    weed/weeds and camera/cameras compare as the same concept.
+    """
+
+    word = str(word or "").lower()
+
+    if (
+        len(word) > 4
+        and word.endswith("ies")
+    ):
+        return word[:-3] + "y"
+
+    if (
+        len(word) > 4
+        and word.endswith("s")
+        and not word.endswith("ss")
+    ):
+        return word[:-1]
+
+    return word
+
+
+def _evidence_agenda_item_numbers(value):
+    """
+    Extract explicit agenda item numbers from source text.
+
+    Only phrases such as:
+      Item 21
+      Items 17 and 18
+      Agenda Item 21
+      Agenda Items 17, 18
+
+    are considered. Dates, addresses, vote totals and years are
+    intentionally ignored.
+    """
+
+    numbers = set()
+
+    pattern = re.compile(
+        r"\b(?:agenda\s+)?items?\s+"
+        r"("
+        r"\d+"
+        r"(?:"
+        r"\s*(?:,|and|&|/)\s*\d+"
+        r")*"
+        r")",
+        re.I,
+    )
+
+    for match in pattern.finditer(
+        str(value or "")
+    ):
+        numbers.update(
+            re.findall(
+                r"\d+",
+                match.group(1),
+            )
+        )
+
+    return numbers
+
+def _action_words(value):
+    words = set()
+
+    for word in re.findall(
+        r"[a-z0-9]+",
+        _action_norm(value),
+    ):
+        if (
+            len(word) < 4
+            or word in ACTION_STOPWORDS
+        ):
+            continue
+
+        words.add(
+            _action_word_root(word)
+        )
+
+    return words
+
+
+def _quote_is_in_source(quote, source):
+    q = _action_norm(quote)
+    s = _action_norm(source)
+
+    return bool(q) and q in s
+
+
+def _formal_action_has_topic_support(
+    topic,
+    item_number,
+    quote,
+):
+    quote_words = _action_words(quote)
+    topic_words = _action_words(topic)
+
+    overlap = len(
+        quote_words & topic_words
+    )
+
+    item_match = False
+
+    item_number = str(
+        item_number or ""
+    ).strip()
+
+    if item_number:
+        item_match = bool(
+            re.search(
+                rf"\b{re.escape(item_number)}\b",
+                str(quote),
+            )
+        )
+
+    has_action_language = bool(
+        quote_words & ACTION_EVIDENCE_TERMS
+    )
+
+    return (
+        has_action_language
+        and (
+            overlap >= 2
+            or item_match
+        )
+    )
+
+
+def _best_supported_nonformal_quote(
+    topic,
+    notes,
+):
+    """
+    Search recording-derived notes for source-supported
+    discussion/consideration evidence for a specific topic.
+
+    Used only when an agenda-mapped action record was paired
+    with evidence that does not actually describe that topic.
+    """
+
+    topic_words = _action_words(
+        topic
+    )
+
+    if len(topic_words) < 2:
+        return None
+
+    raw_lines = str(
+        notes or ""
+    ).splitlines()
+
+    candidates = []
+
+    # Examine single lines and two-line windows so a markdown
+    # topic heading can remain attached to the sentence below it.
+    for i in range(
+        len(raw_lines)
+    ):
+        windows = [
+            raw_lines[i],
+        ]
+
+        if i + 1 < len(raw_lines):
+            windows.append(
+                raw_lines[i]
+                + "\n"
+                + raw_lines[i + 1]
+            )
+
+        for candidate in windows:
+            normalized = _action_norm(
+                candidate
+            )
+
+            if not normalized:
+                continue
+
+            candidate_words = _action_words(
+                candidate
+            )
+
+            overlap = len(
+                topic_words
+                & candidate_words
+            )
+
+            if overlap < 2:
+                continue
+
+            if re.search(
+                r"\b("
+                r"discussion|discussed|discussing"
+                r")\b",
+                normalized,
+            ):
+                status = "discussed"
+
+            elif re.search(
+                r"\b("
+                r"considered|consideration|considering"
+                r")\b",
+                normalized,
+            ):
+                status = "considered"
+
+            else:
+                continue
+
+            # Prefer the strongest topic overlap, then the
+            # shorter evidence excerpt.
+            score = (
+                overlap * 100
+                - len(normalized)
+            )
+
+            candidates.append(
+                (
+                    score,
+                    status,
+                    candidate.strip(),
+                )
+            )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    _, status, quote = candidates[0]
+
+    return {
+        "action_status": status,
+        "evidence_quote": quote,
+    }
+
+
+def _best_supported_staff_followup_quote(
+    topic,
+    notes,
+):
+    """
+    Find recording-derived evidence that city staff follow-up
+    was requested for a specific topic.
+
+    This lets the action ledger preserve the precise supported
+    action instead of collapsing it to generic "discussed".
+    """
+
+    topic_words = _action_words(
+        topic
+    )
+
+    if len(topic_words) < 2:
+        return None
+
+    raw_lines = str(
+        notes or ""
+    ).splitlines()
+
+    candidates = []
+
+    for i in range(
+        len(raw_lines)
+    ):
+        windows = [
+            raw_lines[i],
+        ]
+
+        if i + 1 < len(raw_lines):
+            windows.append(
+                raw_lines[i]
+                + "\n"
+                + raw_lines[i + 1]
+            )
+
+        for candidate in windows:
+            normalized = _action_norm(
+                candidate
+            )
+
+            if not normalized:
+                continue
+
+            if not re.search(
+                r"\brequest(?:ed|ing|s)?\b",
+                normalized,
+            ):
+                continue
+
+            if not re.search(
+                r"\bstaff\b",
+                normalized,
+            ):
+                continue
+
+            if not re.search(
+                r"\bfollow[- ]?up\b",
+                normalized,
+            ):
+                continue
+
+            candidate_words = _action_words(
+                candidate
+            )
+
+            overlap = len(
+                topic_words
+                & candidate_words
+            )
+
+            if overlap < 2:
+                continue
+
+            score = (
+                overlap * 100
+                - len(normalized)
+            )
+
+            candidates.append(
+                (
+                    score,
+                    candidate.strip(),
+                )
+            )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    return candidates[0][1]
+
+
+def build_action_ledger(
+    meeting,
+    notes,
+    agenda,
+    coverage_items=None,
+):
+    """
+    Build an evidence-indexed action ledger.
+
+    Model output is not trusted by itself. Every evidence quote
+    must exist in the claimed source. Formal actions additionally
+    require explicit action language AND topic/item linkage.
+    """
+
+    agenda_items = parse_agenda_structure(
+        agenda
+    )
+
+    coverage_items = coverage_items or []
+
+    required_topics = [
+        str(item.get("topic") or "").strip()
+        for item in coverage_items
+        if str(item.get("topic") or "").strip()
+    ]
+
+    prompt = f"""
+You are extracting a factual action ledger from a city council
+meeting for a local-news fact-checking system.
+
+City: {meeting.get("city_name")}
+Meeting date: {meeting.get("meeting_date")}
+
+Identify the important council actions and substantive
+discussion topics.
+
+For EACH record return:
+
+- topic
+- agenda item number if known
+- action_status
+- evidence_source: exactly "notes" or "agenda"
+- evidence_quote: an EXACT VERBATIM excerpt from that source
+
+CRITICAL RULES:
+
+0. REQUIRED TOPIC COMPLETENESS:
+   Return at least one action-ledger record for EVERY topic
+   listed under REQUIRED COVERAGE TOPICS below.
+
+   Do not omit a topic merely because its final disposition
+   is uncertain.
+
+   If the evidence establishes discussion only, use
+   "discussed" or "considered".
+
+   If even that cannot be established safely, use "unclear".
+
+1. APPROVED, ADOPTED, AUTHORIZED, AWARDED, DIRECTED,
+   REJECTED, DENIED, APPOINTED, ACCEPTED and PASSED are
+   FORMAL ACTION STATUSES.
+
+2. Never use a formal action status unless the evidence quote
+   explicitly establishes that action for THAT SAME TOPIC or
+   agenda item.
+
+3. A generic statement such as:
+   "The Consent Calendar was approved"
+   does NOT prove that a separately listed PUBLIC HEARING or
+   NEW BUSINESS item was approved.
+
+4. An agenda listing proves that an item was scheduled, not how
+   the council ultimately disposed of it.
+
+5. If the source establishes only discussion or consideration,
+   use "discussed" or "considered".
+
+6. If final disposition cannot be established, use "unclear".
+
+7. For public comments, describe the action precisely, such as:
+   "resident comment", "requested staff follow-up", or
+   "no council action".
+
+8. evidence_quote must be copied verbatim. Do not paraphrase it.
+
+================ REQUIRED COVERAGE TOPICS ================
+
+{json.dumps(required_topics, ensure_ascii=False, indent=2)}
+
+================ RECORDING-DERIVED NOTES ================
+
+{notes[:65000]}
+
+================ OFFICIAL AGENDA ================
+
+{agenda[:45000]}
+"""
+
+    client = genai.Client()
+
+    response = retry_api_call(
+        "Action ledger extraction",
+        lambda: client.models.generate_content(
+            model=STORY_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ActionLedger,
+                temperature=0.0,
+            ),
+        ),
+    )
+
+    parsed = getattr(
+        response,
+        "parsed",
+        None,
+    )
+
+    if isinstance(
+        parsed,
+        ActionLedger,
+    ):
+        raw_items = parsed.items
+    else:
+        raw_items = (
+            ActionLedger.model_validate_json(
+                response.text
+            ).items
+        )
+
+    cleaned = []
+
+    for record in raw_items:
+        item = record.model_dump()
+
+        topic = str(
+            item.get("topic") or ""
+        ).strip()
+
+        proposed_item_number = str(
+            item.get("item_number") or ""
+        ).strip()
+
+        agenda_item = _resolve_agenda_item(
+            topic,
+            proposed_item_number,
+            agenda_items,
+        )
+
+        if agenda_item:
+            item_number = agenda_item[
+                "item_number"
+            ]
+            agenda_section = agenda_item[
+                "section"
+            ]
+            agenda_title = agenda_item[
+                "title"
+            ]
+        else:
+            item_number = ""
+            agenda_section = ""
+            agenda_title = ""
+
+        status = _action_norm(
+            item.get("action_status")
+        )
+
+        source_name = _action_norm(
+            item.get("evidence_source")
+        )
+
+        quote = str(
+            item.get("evidence_quote") or ""
+        ).strip()
+
+        source_text = (
+            notes
+            if source_name == "notes"
+            else agenda
+            if source_name == "agenda"
+            else ""
+        )
+
+        quote_valid = _quote_is_in_source(
+            quote,
+            source_text,
+        )
+
+        # For a topic that has been deterministically mapped to
+        # an official agenda item, the evidence quote must also
+        # actually describe that topic.
+        #
+        # This prevents a generic Consent Calendar vote or some
+        # unrelated nearby action from becoming evidence for a
+        # separate Public Hearing or New Business item.
+        if (
+            agenda_item
+            and quote_valid
+        ):
+            topic_overlap = len(
+                _action_words(topic)
+                & _action_words(quote)
+            )
+
+            if topic_overlap < 2:
+                repaired = (
+                    _best_supported_nonformal_quote(
+                        topic,
+                        notes,
+                    )
+                )
+
+                if repaired:
+                    status = repaired[
+                        "action_status"
+                    ]
+
+                    quote = repaired[
+                        "evidence_quote"
+                    ]
+
+                    source_name = "notes"
+                    source_text = notes
+
+                    quote_valid = (
+                        _quote_is_in_source(
+                            quote,
+                            source_text,
+                        )
+                    )
+
+                else:
+                    # Fail closed. The supplied evidence does
+                    # not support this agenda-mapped topic.
+                    quote_valid = False
+
+        # Canonical staff-follow-up evidence:
+        #
+        # If the model returned a generic nonformal status such
+        # as "discussed", but the recording-derived notes contain
+        # explicit topic-matched evidence that staff follow-up
+        # was requested, preserve that more precise action.
+        if status not in ACTION_FORMAL_STATUSES:
+            followup_quote = (
+                _best_supported_staff_followup_quote(
+                    topic,
+                    notes,
+                )
+            )
+
+            if followup_quote:
+                status = (
+                    "requested staff follow-up"
+                )
+
+                source_name = "notes"
+                source_text = notes
+                quote = followup_quote
+
+                quote_valid = (
+                    _quote_is_in_source(
+                        quote,
+                        source_text,
+                    )
+                )
+
+        formal = (
+            status
+            in ACTION_FORMAL_STATUSES
+        )
+
+        formal_valid = True
+
+        if formal:
+            # An agenda listing alone never proves a final
+            # formal council disposition.
+            formal_valid = (
+                source_name == "notes"
+                and quote_valid
+                and _formal_action_has_topic_support(
+                    topic,
+                    item_number,
+                    quote,
+                )
+            )
+
+        validated = (
+            quote_valid
+            and formal_valid
+        )
+
+        validation_note = ""
+
+        if not quote_valid:
+            validation_note = (
+                "Evidence quote was not found verbatim "
+                "in the claimed source."
+            )
+
+        elif formal and not formal_valid:
+            validation_note = (
+                "Formal action lacked sufficiently specific "
+                "topic/item-linked action evidence."
+            )
+
+        if formal and not validated:
+            quote_norm = _action_norm(
+                quote
+            )
+
+            # A stronger formal action may fail validation while
+            # the exact source quote still clearly establishes a
+            # lower-level action such as discussion.
+            #
+            # Preserve that supported action rather than losing
+            # the topic entirely.
+            if (
+                quote_valid
+                and re.search(
+                    r"\b("
+                    r"discussion|discussed|discussing"
+                    r")\b",
+                    quote_norm,
+                )
+            ):
+                status = "discussed"
+                validated = True
+                validation_note = (
+                    "Formal action was not validated; "
+                    "exact source evidence supports discussion."
+                )
+
+            elif (
+                quote_valid
+                and re.search(
+                    r"\b("
+                    r"considered|consideration|considering"
+                    r")\b",
+                    quote_norm,
+                )
+            ):
+                status = "considered"
+                validated = True
+                validation_note = (
+                    "Formal action was not validated; "
+                    "exact source evidence supports consideration."
+                )
+
+            else:
+                status = "unclear"
+
+        if (
+            not validated
+            and status
+            in {
+                "discussed",
+                "considered",
+            }
+        ):
+            status = "unclear"
+
+        evidence_item_numbers = (
+            _evidence_agenda_item_numbers(
+                quote
+            )
+        )
+
+        agenda_linkage_conflict = bool(
+            item_number
+            and evidence_item_numbers
+            and item_number
+            not in evidence_item_numbers
+        )
+
+        if agenda_linkage_conflict:
+            conflict_note = (
+                "Source evidence explicitly references agenda "
+                "item(s) "
+                + ", ".join(
+                    sorted(
+                        evidence_item_numbers,
+                        key=int,
+                    )
+                )
+                + " while the official agenda maps this topic "
+                "to item "
+                + item_number
+                + ". Topic/action evidence may still be used, "
+                "but agenda-section timing must not be inferred."
+            )
+
+            validation_note = (
+                (
+                    validation_note.rstrip()
+                    + " "
+                )
+                if validation_note
+                else ""
+            ) + conflict_note
+
+        cleaned.append(
+            {
+                "topic": topic,
+                "item_number": item_number,
+                "agenda_section":
+                    agenda_section,
+                "agenda_linkage_conflict":
+                    agenda_linkage_conflict,
+                "evidence_item_numbers":
+                    sorted(
+                        evidence_item_numbers,
+                        key=int,
+                    ),
+                "agenda_title":
+                    agenda_title,
+                "action_status": status,
+                "evidence_source":
+                    source_name,
+                "evidence_quote": quote,
+                "validated": validated,
+                "validation_note":
+                    validation_note,
+            }
+        )
+
+    return cleaned
+
+
+def retry_api_call(label, fn, max_attempts=4):
     delay = 20
 
     for attempt in range(max_attempts):
@@ -77,6 +1067,10 @@ def retry_api_call(label, fn, max_attempts=2):
                 or "RESOURCE_EXHAUSTED" in text
                 or "503" in text
                 or "UNAVAILABLE" in text
+                or "500" in text
+                or "ServerError" in text
+                or "internal error encountered"
+                in text.lower()
             )
 
             if not retryable or attempt == max_attempts - 1:
@@ -1082,6 +2076,26 @@ Score higher when justified for:
 A topic can be important even when it was DISCUSSED ONLY.
 Never convert discussion into an approval.
 
+ACTION-STATUS EVIDENCE RULE:
+Mark an item Approved, Adopted, Authorized, Awarded or Directed
+ONLY when the supplied evidence explicitly connects THAT SAME
+ITEM to the motion, vote or council action.
+
+A generic statement such as "the Consent Calendar was approved"
+does NOT establish approval of:
+- a public-hearing item
+- a new-business item
+- another separately numbered agenda item
+- an item whose placement in the consent calendar is not
+  explicitly established by the supplied evidence
+
+Do not infer an item's action status merely because another
+vote occurred nearby in the notes.
+
+If the evidence describes discussion or consideration but does
+not clearly record the item's final action, use Discussed or
+Considered rather than guessing that it passed.
+
 When comparing topics, give substantial weight to FORMAL,
 BINDING government action. Actions affecting elections,
 representation, officeholders, taxes, land use, public safety,
@@ -1264,6 +2278,29 @@ def build_meeting_intelligence(
         entities,
     )
 
+    try:
+        action_ledger = build_action_ledger(
+            meeting,
+            notes,
+            agenda,
+            coverage_items=coverage.get(
+                "items",
+                [],
+            ),
+        )
+    except Exception as exc:
+        print()
+        print(
+            "ERROR: action ledger unavailable:",
+            type(exc).__name__,
+            exc,
+        )
+        print(
+            "Action ledger is required for safe story "
+            "generation; failing closed."
+        )
+        raise
+
     editorial = str(
         coverage.get(
             "editorial_summary",
@@ -1285,6 +2322,7 @@ def build_meeting_intelligence(
 
     return {
         "entities": entities,
+        "action_ledger": action_ledger,
         "coverage_items":
             coverage.get(
                 "items",
@@ -1311,10 +2349,12 @@ def audit_verification_context(intelligence):
         "POLICY EFFECTS, TECHNICAL RELATIONSHIPS OR CONSEQUENCES.",
     ]
 
+    publishable_people = []
+
     for entity in intelligence.get("entities", []):
         status = str(
             entity.get("status", "UNVERIFIED")
-        ).strip()
+        ).strip().upper()
 
         observed = str(
             entity.get("observed_text", "")
@@ -1327,6 +2367,96 @@ def audit_verification_context(intelligence):
         lines.append(
             f"- {status}: {observed!r} -> {canonical!r}"
         )
+
+        if (
+            entity.get("entity_type") == "person"
+            and status in {"VERIFIED", "CORRECTED"}
+            and canonical
+            and canonical not in publishable_people
+        ):
+            publishable_people.append(canonical)
+
+    lines.append("")
+    lines.append("PUBLISHABLE PERSON NAMES:")
+
+    if publishable_people:
+        for name in publishable_people:
+            lines.append(f"- {name}")
+    else:
+        lines.append("- NONE")
+
+    lines.append("")
+    lines.append(
+        "PERSON-NAME RULE: Any human name not listed above "
+        "must not appear in headline, dek, body or key facts."
+    )
+
+    lines.append("")
+    lines.append(
+        "SOURCE-VALIDATED ACTION LEDGER:"
+    )
+    lines.append(
+        "This is an index to exact source excerpts, "
+        "not independent evidence."
+    )
+
+    actions = intelligence.get(
+        "action_ledger",
+        [],
+    )
+
+    if actions:
+        for action in actions:
+            topic = str(
+                action.get("topic", "")
+            ).strip()
+
+            status = str(
+                action.get(
+                    "action_status",
+                    "unclear",
+                )
+            ).strip().upper()
+
+            validated = (
+                action.get("validated")
+                is True
+            )
+
+            lines.append(
+                f"- {status}: {topic}"
+                + (
+                    " [VALIDATED]"
+                    if validated
+                    else " [NOT VALIDATED]"
+                )
+            )
+
+            if action.get(
+                "agenda_linkage_conflict"
+            ):
+                lines.append(
+                    "  Agenda linkage conflict: YES"
+                )
+                lines.append(
+                    "  Audit rule: neutral topic/action wording "
+                    "without agenda-section timing is the "
+                    "required conservative treatment."
+                )
+
+            quote = str(
+                action.get(
+                    "evidence_quote",
+                    "",
+                )
+            ).strip()
+
+            if quote:
+                lines.append(
+                    f"  Exact source excerpt: {quote}"
+                )
+    else:
+        lines.append("- NONE AVAILABLE")
 
     return "\n".join(lines)
 
@@ -1461,6 +2591,110 @@ def writer_context(
 
     lines.append("")
     lines.append(
+        "SOURCE-VALIDATED ACTION LEDGER:"
+    )
+
+    action_ledger = intelligence.get(
+        "action_ledger",
+        [],
+    )
+
+    if action_ledger:
+        for action in action_ledger:
+            status = str(
+                action.get(
+                    "action_status",
+                    "unclear",
+                )
+            ).upper()
+
+            topic = str(
+                action.get(
+                    "topic",
+                    "",
+                )
+            )
+
+            item_number = str(
+                action.get(
+                    "item_number",
+                    "",
+                )
+            ).strip()
+
+            validated = action.get(
+                "validated"
+            ) is True
+
+            prefix = (
+                f"Item {item_number}: "
+                if item_number
+                else ""
+            )
+
+            lines.append(
+                f"- {prefix}{topic}"
+            )
+
+            lines.append(
+                f"  Status: {status}"
+            )
+
+            lines.append(
+                "  Evidence validated: "
+                + (
+                    "YES"
+                    if validated
+                    else "NO"
+                )
+            )
+
+            if action.get(
+                "agenda_linkage_conflict"
+            ):
+                lines.append(
+                    "  Agenda linkage conflict: YES"
+                )
+                lines.append(
+                    "  Public-copy rule: report the supported "
+                    "topic/action without claiming Consent "
+                    "Calendar, Public Hearing, New Business or "
+                    "an agenda item number."
+                )
+
+            quote = str(
+                action.get(
+                    "evidence_quote",
+                    "",
+                )
+            ).strip()
+
+            if quote:
+                lines.append(
+                    f"  Source excerpt: {quote}"
+                )
+    else:
+        lines.append("- NONE AVAILABLE")
+
+    lines.append("")
+    lines.append(
+        "ACTION STATUS RULES:"
+    )
+    lines.append(
+        "- The action ledger controls factual action verbs."
+    )
+    lines.append(
+        "- If a ledger status is UNCLEAR, do not claim that "
+        "the item was approved, adopted, authorized, awarded "
+        "or directed."
+    )
+    lines.append(
+        "- The coverage plan below ranks newsworthiness only. "
+        "Its action-status guesses are NOT factual evidence."
+    )
+
+    lines.append("")
+    lines.append(
         "WHOLE-MEETING COVERAGE PLAN:"
     )
 
@@ -1481,20 +2715,6 @@ def writer_context(
             f"[{item.get('score')}/10] "
             f"[{flag}] "
             f"{item.get('topic')}"
-        )
-
-        lines.append(
-            f"   Action status: "
-            f"{item.get('action_status')}"
-        )
-
-        lines.append(
-            f"   {item.get('summary')}"
-        )
-
-        lines.append(
-            f"   Why it matters: "
-            f"{item.get('why_it_matters')}"
         )
 
     return "\n".join(lines)
@@ -1910,6 +3130,10 @@ REQUIREMENTS:
 
 {context}
 
+================ PERSON-NAME VERIFICATION ================
+
+{audit_verification_context(intelligence)}
+
 ================ CURRENT ARTICLE ================
 
 {final_story.model_dump_json(indent=2)}
@@ -2061,13 +3285,93 @@ NON-NEGOTIABLE RULES:
    Prefer concrete facts, amounts, votes, locations, rules and
    next steps.
 
-10. Do not add any new human names. Preserve only names already
-    present in the current article.
+10. PERSON-NAME WHITELIST IS ABSOLUTE.
+    A human being may be named ONLY when their exact canonical
+    name appears under PUBLISHABLE PERSON NAMES below.
 
-11. Preserve useful supported detail. This is a cleanup pass,
+    If the whitelist says NONE, remove ALL human names from the
+    headline, dek, body and key facts and substitute supported
+    generic roles such as:
+    - a resident
+    - a speaker
+    - a council member
+    - the committee chair
+    - a city staff member
+
+    A name appearing in raw notes or the agenda is NOT by itself
+    permission to publish it.
+
+11. CROSS-FIELD ACTION CONSISTENCY IS REQUIRED.
+    For the same agenda item, headline, dek, body and key facts
+    must not disagree about whether the council approved,
+    adopted, authorized, awarded, directed, considered or
+    discussed it.
+
+    Never use an approval verb in the headline when the supplied
+    evidence supports only discussion or consideration.
+
+    A generic consent-calendar vote cannot establish approval of
+    a separately listed public-hearing or new-business item.
+
+    When final disposition is genuinely unclear, use the most
+    conservative supported action such as considered or
+    discussed.
+
+12. Preserve useful supported detail. This is a cleanup pass,
     not an instruction to make the article vague or shorter.
 
-12. Headline, dek, body and key facts must all obey these rules.
+13. Headline, dek, body and key facts must all obey these rules.
+
+14. REMOVE LEDE REDUNDANCY.
+    The first two body paragraphs must not merely repeat the same
+    council action in slightly different words.
+
+    - Do not begin with generic meeting-recap language such as
+      "The City Council met on..." when a substantive action can
+      lead immediately.
+    - If paragraph 1 states the main action and paragraph 2 only
+      restates that same action with details, combine them into
+      one stronger opening paragraph.
+    - Each following paragraph should add materially new
+      information, context, another action, or another topic.
+
+15. KEEP PUBLIC-COMMENT-ONLY FACTS ATTRIBUTED.
+    A claim made by a resident or speaker is evidence of what the
+    speaker said. It is not automatically independent evidence
+    that the underlying event or allegation occurred.
+
+    If a date, accident, fatality, violation, allegation,
+    property condition, motive, or other concrete fact appears
+    only inside public comment and is not independently supported
+    by the official agenda, staff material, or another official
+    source supplied here, keep the attribution attached.
+
+    Prefer constructions such as:
+    - "a resident said..."
+    - "a resident cited..."
+    - "according to a speaker..."
+    - "the speaker described..."
+
+    Do NOT turn:
+      "A resident requested traffic calming, citing an Aug. 8
+      fatal accident"
+    into:
+      "traffic calming was requested following an Aug. 8 fatal
+      accident"
+    unless the accident itself is independently established by
+    the supplied official evidence.
+
+16. KEEP ADJACENT BUT UNRELATED TOPICS DISTINCT.
+    When two nearby paragraphs mention cameras, surveillance,
+    traffic enforcement, ALPR, speed control, or other similarly
+    named technologies, use specific wording so a reader cannot
+    reasonably infer they are the same system or proposal.
+
+17. WRITE FOR HUMAN-REVIEW READINESS.
+    Remove unnecessary recap language, duplicated facts,
+    mechanical transitions and needless restatement.
+    Preserve all useful supported facts.
+    Do not add facts merely to improve prose.
 
 ================ CURRENT ARTICLE ================
 
