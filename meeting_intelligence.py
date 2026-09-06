@@ -345,6 +345,197 @@ def _evidence_agenda_item_numbers(value):
 
     return numbers
 
+
+def _agenda_item_number_value(value):
+    """
+    Normalize a numeric or spoken agenda item number.
+
+    This exists only to recognize explicit transcript boundaries such
+    as "item number three"; it is not a general number parser.
+    """
+
+    token = re.sub(
+        r"[-\\s]+",
+        " ",
+        str(value or "").strip().casefold(),
+    )
+
+    if re.fullmatch(
+        r"\\d{1,3}",
+        token,
+    ):
+        return str(
+            int(token)
+        )
+
+    units = {
+        "zero": 0,
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+        "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+    }
+
+    if token in units:
+        return str(
+            units[token]
+        )
+
+    tens = {
+        "twenty": 20,
+        "thirty": 30,
+        "forty": 40,
+        "fifty": 50,
+        "sixty": 60,
+        "seventy": 70,
+        "eighty": 80,
+        "ninety": 90,
+    }
+
+    parts = token.split()
+
+    if (
+        len(parts) == 1
+        and parts[0] in tens
+    ):
+        return str(
+            tens[parts[0]]
+        )
+
+    if (
+        len(parts) == 2
+        and parts[0] in tens
+        and parts[1] in units
+        and 0 < units[parts[1]] < 10
+    ):
+        return str(
+            tens[parts[0]]
+            + units[parts[1]]
+        )
+
+    return ""
+
+
+def _agenda_item_transition_numbers(value):
+    """
+    Return agenda item numbers announced as transcript boundaries.
+
+    Mere references to another item are not enough. The number must
+    occur in boundary language such as reading the next item title or
+    explicitly moving/proceeding to an item.
+    """
+
+    number_token = (
+        r"(?:"
+        r"\\d{1,3}|"
+        r"zero|one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|eleven|twelve|thirteen|fourteen|fifteen|"
+        r"sixteen|seventeen|eighteen|nineteen|"
+        r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+        r"(?:[-\\s]+(?:one|two|three|four|five|six|seven|eight|nine))?"
+        r")"
+    )
+
+    patterns = (
+        re.compile(
+            r"\\bread\\s+(?:the\\s+)?title"
+            r"(?:\\s+[a-z]+){0,8}\\s+"
+            r"(?:agenda\\s+)?item(?:\\s+number)?\\s+"
+            + f"(?P<number>{number_token})"
+            + r"\\b",
+            re.I,
+        ),
+        re.compile(
+            r"\\bthe\\s+title"
+            r"(?:\\s+[a-z]+){0,8}\\s+"
+            r"(?:agenda\\s+)?item(?:\\s+number)?\\s+"
+            + f"(?P<number>{number_token})"
+            + r"\\b",
+            re.I,
+        ),
+        re.compile(
+            r"\\b(?:move|moving|go|going|proceed|proceeding|"
+            r"advance|advancing)"
+            r"(?:\\s+[a-z]+){0,8}\\s+"
+            r"(?:on\\s+)?to\\s+"
+            r"(?:agenda\\s+)?item(?:\\s+number)?\\s+"
+            + f"(?P<number>{number_token})"
+            + r"\\b",
+            re.I,
+        ),
+    )
+
+    numbers = set()
+    source = str(
+        value or ""
+    )
+
+    for pattern in patterns:
+        for match in pattern.finditer(
+            source
+        ):
+            number = (
+                _agenda_item_number_value(
+                    match.group("number")
+                )
+            )
+
+            if number:
+                numbers.add(
+                    number
+                )
+
+    return numbers
+
+
+def _candidate_has_foreign_agenda_transition(
+    candidate,
+    agenda_item_number,
+):
+    """
+    A candidate cannot prove one agenda item after the transcript has
+    explicitly transitioned to a different item.
+
+    Clean within-item evidence is still eligible even when it does not
+    repeat the target item number.
+    """
+
+    target = (
+        _agenda_item_number_value(
+            agenda_item_number
+        )
+    )
+
+    if not target:
+        return False
+
+    transitions = (
+        _agenda_item_transition_numbers(
+            candidate
+        )
+    )
+
+    return any(
+        number != target
+        for number in transitions
+    )
+
+
 def _action_words(value):
     words = set()
 
@@ -414,6 +605,7 @@ def _formal_action_has_topic_support(
 def _best_supported_nonformal_quote(
     topic,
     notes,
+    agenda_item_number="",
 ):
     """
     Search recording-derived notes for source-supported
@@ -421,6 +613,10 @@ def _best_supported_nonformal_quote(
 
     Used only when an agenda-mapped action record was paired
     with evidence that does not actually describe that topic.
+
+    When the target agenda item is known, evidence windows that
+    explicitly transition to a different agenda item are rejected
+    before scoring.
     """
 
     topic_words = _action_words(
@@ -453,6 +649,12 @@ def _best_supported_nonformal_quote(
             )
 
         for candidate in windows:
+            if _candidate_has_foreign_agenda_transition(
+                candidate,
+                agenda_item_number,
+            ):
+                continue
+
             normalized = _action_norm(
                 candidate
             )
@@ -520,7 +722,6 @@ def _best_supported_nonformal_quote(
         "action_status": status,
         "evidence_quote": quote,
     }
-
 
 def _best_supported_staff_followup_quote(
     topic,
@@ -833,6 +1034,7 @@ CRITICAL RULES:
                     _best_supported_nonformal_quote(
                         topic,
                         notes,
+                        agenda_item_number=item_number,
                     )
                 )
 
