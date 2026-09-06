@@ -355,13 +355,13 @@ def _agenda_item_number_value(value):
     """
 
     token = re.sub(
-        r"[-\\s]+",
+        r"[-\s]+",
         " ",
         str(value or "").strip().casefold(),
     )
 
     if re.fullmatch(
-        r"\\d{1,3}",
+        r"\d{1,3}",
         token,
     ):
         return str(
@@ -442,40 +442,40 @@ def _agenda_item_transition_numbers(value):
 
     number_token = (
         r"(?:"
-        r"\\d{1,3}|"
+        r"\d{1,3}|"
         r"zero|one|two|three|four|five|six|seven|eight|nine|"
         r"ten|eleven|twelve|thirteen|fourteen|fifteen|"
         r"sixteen|seventeen|eighteen|nineteen|"
         r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
-        r"(?:[-\\s]+(?:one|two|three|four|five|six|seven|eight|nine))?"
+        r"(?:[-\s]+(?:one|two|three|four|five|six|seven|eight|nine))?"
         r")"
     )
 
     patterns = (
         re.compile(
-            r"\\bread\\s+(?:the\\s+)?title"
-            r"(?:\\s+[a-z]+){0,8}\\s+"
-            r"(?:agenda\\s+)?item(?:\\s+number)?\\s+"
+            r"\bread\s+(?:the\s+)?title"
+            r"(?:\s+[a-z]+){0,8}\s+"
+            r"(?:agenda\s+)?item(?:\s+number)?\s+"
             + f"(?P<number>{number_token})"
-            + r"\\b",
+            + r"\b",
             re.I,
         ),
         re.compile(
-            r"\\bthe\\s+title"
-            r"(?:\\s+[a-z]+){0,8}\\s+"
-            r"(?:agenda\\s+)?item(?:\\s+number)?\\s+"
+            r"\bthe\s+title"
+            r"(?:\s+[a-z]+){0,8}\s+"
+            r"(?:agenda\s+)?item(?:\s+number)?\s+"
             + f"(?P<number>{number_token})"
-            + r"\\b",
+            + r"\b",
             re.I,
         ),
         re.compile(
-            r"\\b(?:move|moving|go|going|proceed|proceeding|"
+            r"\b(?:move|moving|go|going|proceed|proceeding|"
             r"advance|advancing)"
-            r"(?:\\s+[a-z]+){0,8}\\s+"
-            r"(?:on\\s+)?to\\s+"
-            r"(?:agenda\\s+)?item(?:\\s+number)?\\s+"
+            r"(?:\s+[a-z]+){0,8}\s+"
+            r"(?:on\s+)?to\s+"
+            r"(?:agenda\s+)?item(?:\s+number)?\s+"
             + f"(?P<number>{number_token})"
-            + r"\\b",
+            + r"\b",
             re.I,
         ),
     )
