@@ -148,34 +148,250 @@ AGENDA_SECTION_NAMES = {
     "MAYOR'S, COMMISSION, COMMITTEE REPORTS AND ACTIONS",
 }
 
+AGENDA_SECTION_ALIASES = {
+    "CONSENT CALENDAR ITEMS":
+        "CONSENT CALENDAR",
+
+    "PUBLIC HEARING":
+        "PUBLIC HEARINGS",
+
+    "PUBLIC HEARING ITEMS":
+        "PUBLIC HEARINGS",
+
+    "PUBLIC HEARINGS ITEMS":
+        "PUBLIC HEARINGS",
+
+    "NEW BUSINESS ITEMS":
+        "NEW BUSINESS",
+
+    "PRESENTATION":
+        "PRESENTATIONS",
+
+    "PRESENTATION ITEMS":
+        "PRESENTATIONS",
+
+    "PUBLIC COMMENT":
+        "PUBLIC COMMENTS",
+
+    "PUBLIC COMMENT ITEMS":
+        "PUBLIC COMMENTS",
+
+    "CLOSED SESSION ITEMS":
+        "CLOSED SESSION",
+
+    "ITEMS REMOVED FROM THE CONSENT CALENDAR":
+        "ITEMS REMOVED FROM THE CONSENT CALENDAR",
+}
+
+
+def _canonical_agenda_section(value):
+    """
+    Normalize harmless agenda-heading variations to one
+    deterministic section name.
+    """
+
+    upper = (
+        str(value or "")
+        .replace(
+            "\u2019",
+            "'",
+        )
+        .replace(
+            "\u2018",
+            "'",
+        )
+    )
+
+    upper = re.sub(
+        r"\s+",
+        " ",
+        upper.strip(),
+    ).upper()
+
+    if upper in AGENDA_SECTION_NAMES:
+        return upper
+
+    return AGENDA_SECTION_ALIASES.get(
+        upper,
+        "",
+    )
+
+
+
+def _agenda_section_from_heading(value):
+    """
+    Recognize common agenda section-heading variations without
+    treating their leading outline number as an agenda item.
+
+    The returned value is canonical internal metadata only.
+    """
+
+    cleaned = (
+        str(value or "")
+        .replace(
+            "\u2019",
+            "'",
+        )
+        .replace(
+            "\u2018",
+            "'",
+        )
+    )
+
+    cleaned = re.sub(
+        r"\s+",
+        " ",
+        cleaned.strip(),
+    )
+
+    cleaned = cleaned.rstrip(
+        ":"
+    ).strip().upper()
+
+    canonical = (
+        _canonical_agenda_section(
+            cleaned
+        )
+    )
+
+    if canonical:
+        return canonical
+
+    aliases = {
+        "SPECIAL PRESENTATIONS":
+            "PRESENTATIONS",
+
+        "COMMUNITY INPUT":
+            "PUBLIC COMMENTS",
+
+        "DISCUSSION":
+            "DISCUSSION",
+
+        "DISCUSSION ITEMS":
+            "DISCUSSION",
+
+        "CITY COUNCIL DISCUSSION":
+            "DISCUSSION",
+
+        "CITY COUNCIL DISCUSSION ITEMS":
+            "DISCUSSION",
+
+        "DISCUSSION/ACTION ITEMS":
+            "DISCUSSION",
+
+        "DISCUSSION / ACTION ITEMS":
+            "DISCUSSION",
+
+        "DISCUSSION AND ACTION ITEMS":
+            "DISCUSSION",
+
+        "DISCUSSION & ACTION ITEMS":
+            "DISCUSSION",
+
+        "ACTION ITEMS":
+            "DISCUSSION",
+
+        "ADDITIONS, DELETIONS, REORDERING TO THE AGENDA":
+            "AGENDA CHANGES",
+
+        "CITY MANAGER'S REPORT":
+            "CITY MANAGER REPORTS",
+
+        "CITY MANAGER' S REPORT":
+            "CITY MANAGER REPORTS",
+
+        "ANNOUNCEMENTS / COUNCIL COMMENTS / COMMITTEE UPDATES":
+            "COUNCIL MEMBER COMMENTS AND ACTIONS",
+
+        "ADJOURNMENT":
+            "ADJOURNMENT",
+    }
+
+    return aliases.get(
+        cleaned,
+        "",
+    )
+
+
 
 def parse_agenda_structure(agenda):
     """
     Deterministically extract numbered agenda items and their
     official sections.
 
+    Supported item forms include:
+
+      21. Public Hearing Title
+
+      5.6
+      Consent Calendar Item Title
+
+      5.7 Traffic Signal Item Title
+
+      5.8. Another Item Title
+
+      4.6) Security Agreement
+
+    Wrapped all-caps item titles are merged before matching.
+
+    Obvious document furniture such as a street address or a
+    four-digit year is not treated as an agenda item.
+
     The official agenda, not transcript-derived notes, controls
     item numbering, item titles and section placement.
     """
-
     items = []
     current_section = ""
+    current_section_number = ""
+    pending_item_number = None
 
-    for raw_line in str(
-        agenda or ""
-    ).splitlines():
-
-        line = re.sub(
+    lines = [
+        re.sub(
             r"\s+",
             " ",
             raw_line.strip(),
         )
+        for raw_line in str(
+            agenda or ""
+        ).splitlines()
+    ]
 
-        if not line:
-            continue
+    number_title_pattern = re.compile(
+        r"^"
+        r"(\d+(?:\.\d+)*)"
+        r"(?:[.)])?"
+        r"\s+"
+        r"(.+)"
+        r"$"
+    )
 
-        upper = (
-            line.replace(
+    number_only_pattern = re.compile(
+        r"^"
+        r"(\d+(?:\.\d+)*)"
+        r"(?:[.)])?"
+        r"$"
+    )
+
+    street_suffix_pattern = re.compile(
+        r"\b(?:"
+        r"parkway|pkwy|"
+        r"road|rd|"
+        r"street|st|"
+        r"avenue|ave|"
+        r"drive|dr|"
+        r"boulevard|blvd|"
+        r"lane|ln|"
+        r"court|ct|"
+        r"way"
+        r")\b",
+        re.I,
+    )
+
+    def normalized_upper(
+        value,
+    ):
+        return (
+            value.replace(
                 "\u2019",
                 "'",
             )
@@ -186,40 +402,610 @@ def parse_agenda_structure(agenda):
             .upper()
         )
 
-        if upper in AGENDA_SECTION_NAMES:
-            current_section = upper
-            continue
+    def plausible_item_number(
+        value,
+    ):
+        value = str(
+            value or ""
+        )
 
-        match = re.match(
-            r"^(\d+)\.\s+(.+)$",
-            line,
+        if "." in value:
+            return True
+
+        if not value.isdigit():
+            return False
+
+        number = int(
+            value
+        )
+
+        # Four-digit years appearing inside a wrapped title are
+        # content, not agenda item numbers.
+        if 1900 <= number <= 2100:
+            return False
+
+        return True
+
+    def usable_inline_match(
+        value,
+    ):
+        match = number_title_pattern.match(
+            value
         )
 
         if not match:
-            continue
+            return None
 
-        items.append(
-            {
-                "item_number":
-                    match.group(1),
-                "section":
-                    current_section,
-                "title":
-                    match.group(2).strip(),
-            }
+        item_number = match.group(
+            1
         )
 
+        title = match.group(
+            2
+        ).strip()
+
+        if not plausible_item_number(
+            item_number
+        ):
+            return None
+
+        # Reject document-furniture street addresses such as:
+        #
+        #   30111 Crown Valley Parkway
+        #
+        # Agenda item numbers in these feeds are not five-digit
+        # street numbers, and the street suffix makes the intent
+        # explicit.
+        if (
+            "." not in item_number
+            and len(
+                item_number
+            ) >= 5
+            and street_suffix_pattern.search(
+                title
+            )
+        ):
+            return None
+
+        return match
+
+    def numbered_section_match(
+        value,
+    ):
+        match = number_title_pattern.match(
+            value
+        )
+
+        if not match:
+            return None
+
+        if not plausible_item_number(
+            match.group(
+                1
+            )
+        ):
+            return None
+
+        section = (
+            _agenda_section_from_heading(
+                match.group(
+                    2
+                )
+            )
+        )
+
+        if not section:
+            return None
+
+        return (
+            match,
+            section,
+        )
+
+    def is_wrapped_title_continuation(
+        value,
+    ):
+        if not value:
+            return False
+
+        upper = normalized_upper(
+            value
+        )
+
+        if _agenda_section_from_heading(
+            upper
+        ):
+            return False
+
+        if numbered_section_match(
+            value
+        ):
+            return False
+
+        if usable_inline_match(
+            value
+        ):
+            return False
+
+        standalone = number_only_pattern.fullmatch(
+            value
+        )
+
+        if (
+            standalone
+            and plausible_item_number(
+                standalone.group(
+                    1
+                )
+            )
+        ):
+            return False
+
+        # The agendas that need continuation recovery use
+        # uppercase wrapped title lines. Restricting to uppercase
+        # prevents staff recommendations/body text from being
+        # absorbed into the official title.
+        if value != value.upper():
+            return False
+
+        if value.endswith(
+            ":"
+        ):
+            return False
+
+        if re.match(
+            r"^(?:"
+            r"STAFF\s+RECOMMENDS|"
+            r"STAFF\s+RECOMMENDATION|"
+            r"RECOMMENDATION|"
+            r"BACKGROUND|"
+            r"FISCAL\s+IMPACT|"
+            r"ATTACHMENTS?|"
+            r"AGENDA|"
+            r"CITY\s+OF"
+            r")\b",
+            value,
+            re.I,
+        ):
+            return False
+
+        return bool(
+            re.search(
+                r"[A-Za-z]",
+                value,
+            )
+        )
+
+    def collect_wrapped_title(
+        first_title,
+        next_index,
+    ):
+        title_parts = [
+            first_title.strip()
+        ]
+
+        index = next_index
+
+        while index < len(
+            lines
+        ):
+            candidate = lines[
+                index
+            ]
+
+            if not is_wrapped_title_continuation(
+                candidate
+            ):
+                break
+
+            title_parts.append(
+                candidate
+            )
+
+            index += 1
+
+        return (
+            " ".join(
+                title_parts
+            ).strip(),
+            index,
+        )
+
+    index = 0
+
+    while index < len(
+        lines
+    ):
+        line = lines[
+            index
+        ]
+
+        if not line:
+            index += 1
+            continue
+
+        upper = normalized_upper(
+            line
+        )
+
+        # --------------------------------------------------
+        # UNNUMBERED SECTION HEADING
+        # --------------------------------------------------
+
+        section = (
+            _agenda_section_from_heading(
+                upper
+            )
+        )
+
+        if section:
+            current_section = section
+            current_section_number = ""
+            pending_item_number = None
+
+            index += 1
+            continue
+
+        # --------------------------------------------------
+        # NUMBERED SECTION HEADING
+        # --------------------------------------------------
+
+        numbered_section = (
+            numbered_section_match(
+                line
+            )
+        )
+
+        if numbered_section:
+            section_match, section = (
+                numbered_section
+            )
+
+            current_section = section
+
+            current_section_number = (
+                section_match.group(
+                    1
+                ).split(
+                    "."
+                )[0]
+            )
+
+            pending_item_number = None
+
+            index += 1
+            continue
+
+        # --------------------------------------------------
+        # NUMBER + TITLE ON SAME LINE
+        # --------------------------------------------------
+
+        inline_match = usable_inline_match(
+            line
+        )
+
+        if inline_match:
+            item_number = (
+                inline_match.group(
+                    1
+                )
+            )
+
+            major = (
+                item_number.split(
+                    "."
+                )[0]
+            )
+
+            if (
+                current_section_number
+                and major
+                != current_section_number
+            ):
+                current_section = ""
+                current_section_number = ""
+
+            title, next_index = (
+                collect_wrapped_title(
+                    inline_match.group(
+                        2
+                    ),
+                    index + 1,
+                )
+            )
+
+            items.append(
+                {
+                    "item_number":
+                        item_number,
+
+                    "section":
+                        current_section,
+
+                    "title":
+                        title,
+                }
+            )
+
+            pending_item_number = None
+            index = next_index
+
+            continue
+
+        # --------------------------------------------------
+        # NUMBER ON ITS OWN LINE
+        # --------------------------------------------------
+
+        standalone_match = (
+            number_only_pattern.fullmatch(
+                line
+            )
+        )
+
+        if (
+            standalone_match
+            and plausible_item_number(
+                standalone_match.group(
+                    1
+                )
+            )
+        ):
+            item_number = (
+                standalone_match.group(
+                    1
+                )
+            )
+
+            major = (
+                item_number.split(
+                    "."
+                )[0]
+            )
+
+            if (
+                current_section_number
+                and major
+                != current_section_number
+            ):
+                current_section = ""
+                current_section_number = ""
+
+            pending_item_number = (
+                item_number
+            )
+
+            index += 1
+            continue
+
+        # --------------------------------------------------
+        # TITLE FOLLOWING A STANDALONE NUMBER
+        # --------------------------------------------------
+
+        if pending_item_number:
+            title, next_index = (
+                collect_wrapped_title(
+                    line,
+                    index + 1,
+                )
+            )
+
+            items.append(
+                {
+                    "item_number":
+                        pending_item_number,
+
+                    "section":
+                        current_section,
+
+                    "title":
+                        title,
+                }
+            )
+
+            pending_item_number = None
+            index = next_index
+
+            continue
+
+        index += 1
+
     return items
+
+
+def _action_topic_component_labels(
+    topic,
+):
+    """
+    Return explicit textual components of a compound topic.
+
+    This is evidentiary decomposition only. It does not rewrite
+    the original coverage topic.
+
+    Example:
+
+      Automated License Plate Recognition (ALPR)
+      and Digital Signage
+
+    becomes:
+
+      [
+        "Automated License Plate Recognition (ALPR)",
+        "Digital Signage",
+      ]
+    """
+
+    parts = re.split(
+        r"\s+(?:and|&)\s+|\s*/\s*",
+        str(
+            topic or ""
+        ),
+        flags=re.I,
+    )
+
+    labels = []
+
+    for part in parts:
+        label = part.strip()
+
+        if not label:
+            continue
+
+        if not _action_words(
+            label
+        ):
+            continue
+
+        labels.append(
+            label
+        )
+
+    return labels
+
+
+def _action_topic_components(topic):
+    """
+    Split only explicit compound-topic conjunctions.
+
+    This is used conservatively for evidence scope, not for
+    rewriting topic labels.
+
+    Example:
+
+      Automated License Plate Recognition (ALPR)
+      and Digital Signage
+
+    becomes two evidentiary components.
+    """
+
+    parts = re.split(
+        r"\s+(?:and|&)\s+|\s*/\s*",
+        str(
+            topic or ""
+        ),
+        flags=re.I,
+    )
+
+    components = []
+
+    for part in parts:
+        words = _action_words(
+            part
+        )
+
+        if words:
+            components.append(
+                words
+            )
+
+    return components
+
+
+def _topic_scope_supported(
+    topic,
+    evidence,
+):
+    """
+    Require evidence for the full topical scope.
+
+    A compound topic cannot inherit a formal action when the
+    evidence describes only one side.
+
+    For a compound topic:
+      - total meaningful overlap must be at least two words; and
+      - every explicit component must contribute at least one
+        meaningful evidence word.
+    """
+
+    topic_words = _action_words(
+        topic
+    )
+
+    evidence_words = _action_words(
+        evidence
+    )
+
+    total_overlap = len(
+        topic_words
+        & evidence_words
+    )
+
+    if total_overlap < 2:
+        return False
+
+    components = (
+        _action_topic_components(
+            topic
+        )
+    )
+
+    if len(
+        components
+    ) <= 1:
+        return True
+
+    for component in components:
+        if not (
+            component
+            & evidence_words
+        ):
+            return False
+
+    return True
 
 
 def _agenda_match_score(
     topic,
     agenda_title,
 ):
-    return len(
-        _action_words(topic)
-        & _action_words(agenda_title)
-    )
+    if _topic_scope_supported(
+        topic,
+        agenda_title,
+    ):
+        return len(
+            _action_words(topic)
+            & _action_words(agenda_title)
+        )
+
+    # Official agenda headings are often broader than editorial
+    # coverage labels. A trailing designation/status qualifier can
+    # describe the same underlying subject rather than a second
+    # independent agenda topic.
+    #
+    # Keep this intentionally narrow so truly compound topics such
+    # as "ALPR and Digital Signage" still require full-scope support.
+    simplified_topic = re.sub(
+        r"\s+(?:and|&)\s+"
+        r"[^,;]+?"
+        r"\b(?:designation|status)\b"
+        r"\s*$",
+        "",
+        str(
+            topic or ""
+        ),
+        flags=re.I,
+    ).strip()
+
+    if (
+        simplified_topic
+        and simplified_topic
+        != str(
+            topic or ""
+        ).strip()
+        and _topic_scope_supported(
+            simplified_topic,
+            agenda_title,
+        )
+    ):
+        return len(
+            _action_words(
+                simplified_topic
+            )
+            & _action_words(
+                agenda_title
+            )
+        )
+
+    return 0
 
 
 def _resolve_agenda_item(
@@ -231,11 +1017,19 @@ def _resolve_agenda_item(
     Resolve a model-proposed item number against the actual
     official agenda.
 
-    A proposed number is accepted only when its official title
-    actually matches the topic. Otherwise we search the official
-    agenda for the best topic match.
-    """
+    A proposed number normally requires the official-title topic
+    matcher to succeed.
 
+    One conservative fallback is permitted when:
+      - the proposed number exactly exists,
+      - that candidate belongs to an official agenda section, and
+      - topic and official title share at least three meaningful
+        identity words.
+
+    This handles a broader editorial topic label without allowing
+    unrelated or unsectioned document furniture to control agenda
+    linkage.
+    """
     proposed = str(
         proposed_item_number or ""
     ).strip()
@@ -243,12 +1037,43 @@ def _resolve_agenda_item(
     if proposed:
         for item in agenda_items:
             if (
-                item["item_number"]
-                == proposed
-                and _agenda_match_score(
+                item[
+                    "item_number"
+                ]
+                != proposed
+            ):
+                continue
+
+            score = (
+                _agenda_match_score(
                     topic,
-                    item["title"],
-                ) >= 2
+                    item[
+                        "title"
+                    ],
+                )
+            )
+
+            if score >= 2:
+                return item
+
+            overlap = (
+                _action_words(
+                    topic
+                )
+                & _action_words(
+                    item[
+                        "title"
+                    ]
+                )
+            )
+
+            if (
+                item.get(
+                    "section"
+                )
+                and len(
+                    overlap
+                ) >= 3
             ):
                 return item
 
@@ -258,7 +1083,9 @@ def _resolve_agenda_item(
     for item in agenda_items:
         score = _agenda_match_score(
             topic,
-            item["title"],
+            item[
+                "title"
+            ],
         )
 
         if score > best_score:
@@ -269,6 +1096,7 @@ def _resolve_agenda_item(
         return best
 
     return None
+
 
 
 def _action_norm(value):
@@ -306,29 +1134,58 @@ def _action_word_root(word):
     return word
 
 
+def _agenda_item_sort_key(value):
+    """
+    Sort hierarchical agenda numbers numerically.
+
+    Examples:
+      5.6  < 5.10
+      17   < 21
+    """
+
+    return tuple(
+        int(part)
+        for part in str(
+            value or ""
+        ).split(".")
+        if part != ""
+    )
+
+
 def _evidence_agenda_item_numbers(value):
     """
     Extract explicit agenda item numbers from source text.
 
-    Only phrases such as:
+    Recognizes forms such as:
+
       Item 21
       Items 17 and 18
       Agenda Item 21
-      Agenda Items 17, 18
+      Item No. 5.6
+      Agenda Items 5.6 and 5.9
 
-    are considered. Dates, addresses, vote totals and years are
-    intentionally ignored.
+    Dates, addresses, vote totals and years are intentionally
+    ignored.
     """
 
     numbers = set()
 
+    item_number = (
+        r"\d+(?:\.\d+)*"
+    )
+
     pattern = re.compile(
-        r"\b(?:agenda\s+)?items?\s+"
+        r"\b"
+        r"(?:agenda\s+)?"
+        r"items?"
+        r"(?:\s+no\.?)?"
+        r"\s+"
         r"("
-        r"\d+"
-        r"(?:"
-        r"\s*(?:,|and|&|/)\s*\d+"
-        r")*"
+        + item_number
+        + r"(?:"
+        r"\s*(?:,|and|&|/)\s*"
+        + item_number
+        + r")*"
         r")",
         re.I,
     )
@@ -338,12 +1195,205 @@ def _evidence_agenda_item_numbers(value):
     ):
         numbers.update(
             re.findall(
-                r"\d+",
+                item_number,
                 match.group(1),
             )
         )
 
+    # Recording notes sometimes preserve both an original
+    # outline number and an explicit reordered number:
+    #
+    #   Item 6.2 (Post-swap to 6.3)
+    #
+    # Treat the explicitly identified destination as another
+    # source item reference. This is not inference; the source
+    # itself states the renumbering/reordering.
+    reorder_pattern = re.compile(
+        r"\b(?:"
+        r"post[- ]?swap|"
+        r"reordered|"
+        r"renumbered|"
+        r"moved"
+        r")"
+        r"\s+to\s+"
+        r"(\d+(?:\.\d+)*)"
+        r"\b",
+        re.I,
+    )
+
+    for match in reorder_pattern.finditer(
+        str(
+            value or ""
+        )
+    ):
+        numbers.add(
+            match.group(
+                1
+            )
+        )
+
     return numbers
+
+
+
+def _agenda_item_number_value(value):
+    """
+    Normalize a numeric or spoken agenda item number used in an
+    explicit transcript agenda transition.
+    """
+
+    token = re.sub(
+        r"[-\s]+",
+        " ",
+        str(value or "").strip().casefold(),
+    )
+
+    if re.fullmatch(r"\d{1,3}", token):
+        return str(int(token))
+
+    units = {
+        "zero": 0,
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+        "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+    }
+
+    if token in units:
+        return str(units[token])
+
+    tens = {
+        "twenty": 20,
+        "thirty": 30,
+        "forty": 40,
+        "fifty": 50,
+        "sixty": 60,
+        "seventy": 70,
+        "eighty": 80,
+        "ninety": 90,
+    }
+
+    parts = token.split()
+
+    if len(parts) == 1 and parts[0] in tens:
+        return str(tens[parts[0]])
+
+    if (
+        len(parts) == 2
+        and parts[0] in tens
+        and parts[1] in units
+        and 0 < units[parts[1]] < 10
+    ):
+        return str(tens[parts[0]] + units[parts[1]])
+
+    return ""
+
+
+def _agenda_item_transition_numbers(value):
+    """
+    Return agenda numbers announced as actual transcript boundaries.
+
+    References like "item 3" by themselves are deliberately not
+    considered boundaries. We require language that reads or moves
+    to the next agenda item.
+    """
+
+    number_token = (
+        r"(?:"
+        r"\d{1,3}|"
+        r"zero|one|two|three|four|five|six|seven|eight|nine|"
+        r"ten|eleven|twelve|thirteen|fourteen|fifteen|"
+        r"sixteen|seventeen|eighteen|nineteen|"
+        r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+        r"(?:[-\s]+(?:one|two|three|four|five|six|seven|eight|nine))?"
+        r")"
+    )
+
+    patterns = (
+        re.compile(
+            r"\bread\s+(?:the\s+)?title"
+            r"(?:\s+[a-z]+){0,8}\s+"
+            r"(?:agenda\s+)?item(?:\s+number)?\s+"
+            + f"(?P<number>{number_token})"
+            + r"\b",
+            re.I,
+        ),
+        re.compile(
+            r"\bthe\s+title"
+            r"(?:\s+[a-z]+){0,8}\s+"
+            r"(?:agenda\s+)?item(?:\s+number)?\s+"
+            + f"(?P<number>{number_token})"
+            + r"\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?:move|moving|go|going|proceed|proceeding|"
+            r"advance|advancing)"
+            r"(?:\s+[a-z]+){0,8}\s+"
+            r"(?:on\s+)?to\s+"
+            r"(?:agenda\s+)?item(?:\s+number)?\s+"
+            + f"(?P<number>{number_token})"
+            + r"\b",
+            re.I,
+        ),
+    )
+
+    numbers = set()
+    source = str(value or "")
+
+    for pattern in patterns:
+        for match in pattern.finditer(source):
+            number = _agenda_item_number_value(
+                match.group("number")
+            )
+            if number:
+                numbers.add(number)
+
+    return numbers
+
+
+def _candidate_has_foreign_agenda_transition(
+    candidate,
+    agenda_item_number,
+):
+    """
+    Evidence for one agenda item cannot cross an explicit transition
+    to another item.
+
+    Clean evidence does NOT need to repeat the target item number.
+    """
+
+    target = _agenda_item_number_value(
+        agenda_item_number
+    )
+
+    if not target:
+        return False
+
+    transitions = _agenda_item_transition_numbers(
+        candidate
+    )
+
+    return any(
+        number != target
+        for number in transitions
+    )
+
 
 def _action_words(value):
     words = set()
@@ -365,23 +1415,743 @@ def _action_words(value):
     return words
 
 
+def _evidence_text_norm(value):
+    """
+    Normalize presentation-only Markdown before testing whether
+    an evidence excerpt exists in source material.
+
+    This deliberately removes formatting, not factual words.
+
+    For example these are evidentially identical:
+
+      * Motion to approve: Councilmember Smith
+      Motion to approve: Councilmember Smith
+
+    The stored evidence excerpt can still retain the exact source
+    Markdown when CouncilWatch repairs an invalid model quote.
+    """
+
+    text = str(
+        value or ""
+    )
+
+    text = (
+        text.replace(
+            "\u2018",
+            "'",
+        )
+        .replace(
+            "\u2019",
+            "'",
+        )
+    )
+
+    # Source-note Markdown sometimes escapes punctuation.
+    text = text.replace(
+        "\\'",
+        "'",
+    )
+
+    # Remove common emphasis markers.
+    text = text.replace(
+        "**",
+        "",
+    )
+
+    text = text.replace(
+        "__",
+        "",
+    )
+
+    # Remove Markdown list markers only at line starts.
+    text = re.sub(
+        r"(?m)^\s*[-*+]\s+",
+        "",
+        text,
+    )
+
+    # Remove remaining single emphasis markers.
+    text = text.replace(
+        "*",
+        "",
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
+
+    return text.strip().lower()
+
+
 def _quote_is_in_source(quote, source):
-    q = _action_norm(quote)
-    s = _action_norm(source)
+    q = _evidence_text_norm(
+        quote
+    )
+
+    s = _evidence_text_norm(
+        source
+    )
 
     return bool(q) and q in s
+
+
+def _consent_item_source_labels(
+    item_number,
+    agenda_items,
+):
+    """
+    Return source-note labels that can safely identify one
+    official Consent Calendar item.
+
+    Some agenda systems number consent items hierarchically:
+
+      official agenda: 5.6
+      recording notes: Item 6
+
+    The leaf-number shorthand is accepted ONLY when exactly one
+    official Consent Calendar item has that leaf number.
+    """
+
+    canonical = str(
+        item_number or ""
+    ).strip()
+
+    if not canonical:
+        return set()
+
+    labels = {
+        canonical,
+    }
+
+    parts = canonical.split(
+        "."
+    )
+
+    if len(parts) < 2:
+        return labels
+
+    leaf = parts[-1]
+
+    matches = [
+        item
+        for item in agenda_items
+        if (
+            str(
+                item.get(
+                    "section",
+                    "",
+                )
+            ).upper()
+            == "CONSENT CALENDAR"
+            and str(
+                item.get(
+                    "item_number",
+                    "",
+                )
+            )
+            .split(".")[-1]
+            == leaf
+        )
+    ]
+
+    if len(matches) == 1:
+        labels.add(
+            leaf
+        )
+
+    return labels
+
+
+def _best_supported_consent_action_quote(
+    item_number,
+    agenda_items,
+    notes,
+):
+    """
+    Find an exact recording-note excerpt proving that a specific
+    official Consent Calendar item was included in an approval
+    block.
+
+    This does NOT treat a generic Consent Calendar vote as proof
+    for every consent item.
+
+    The notes must explicitly identify the relevant item number,
+    either by its canonical number or by an unambiguous leaf
+    shorthand such as:
+
+      official item 5.6
+      source heading "Consent Calendar (Item 6, 7, 8)"
+
+    This rule cannot validate Public Hearing or New Business
+    items because the official agenda section must be Consent
+    Calendar before this helper is used.
+    """
+
+    labels = _consent_item_source_labels(
+        item_number,
+        agenda_items,
+    )
+
+    if not labels:
+        return None
+
+    raw_lines = str(
+        notes or ""
+    ).splitlines()
+
+    for i, raw_line in enumerate(
+        raw_lines
+    ):
+        normalized = _evidence_text_norm(
+            raw_line
+        )
+
+        if (
+            "consent calendar"
+            not in normalized
+        ):
+            continue
+
+        cited = (
+            _evidence_agenda_item_numbers(
+                raw_line
+            )
+        )
+
+        if not (
+            cited
+            & labels
+        ):
+            continue
+
+        block = [
+            raw_line,
+        ]
+
+        # Consent summaries are normally short. Capture the
+        # exact heading plus the immediately following action
+        # lines until a blank line or a new Markdown heading.
+        for j in range(
+            i + 1,
+            min(
+                len(raw_lines),
+                i + 8,
+            ),
+        ):
+            candidate = raw_lines[j]
+
+            if not candidate.strip():
+                break
+
+            candidate_norm = (
+                _evidence_text_norm(
+                    candidate
+                )
+            )
+
+            if (
+                candidate_norm.startswith(
+                    "agenda item "
+                )
+                or candidate_norm.startswith(
+                    "consent calendar"
+                )
+            ):
+                break
+
+            block.append(
+                candidate
+            )
+
+        quote = "\n".join(
+            block
+        ).strip()
+
+        quote_norm = (
+            _evidence_text_norm(
+                quote
+            )
+        )
+
+        # A simple leaf shorthand such as source "Item 6"
+        # can identify official Consent item 5.6 only when the
+        # same source block does not explicitly identify a
+        # different dotted item.
+        #
+        # This preserves RSM's clean:
+        #
+        #   Consent Calendar (Item 6, 7, 8)
+        #
+        # while rejecting Aliso's contradictory block:
+        #
+        #   Consent Calendar (Agenda Item 6)
+        #   Item 6.1: Historical Preservation...
+        #
+        # as proof of official Consent item 4.6.
+        quoted_numbers = (
+            _evidence_agenda_item_numbers(
+                quote
+            )
+        )
+
+        dotted_numbers = {
+            number
+            for number
+            in quoted_numbers
+            if "." in number
+        }
+
+        if (
+            dotted_numbers
+            and not (
+                dotted_numbers
+                & labels
+            )
+        ):
+            continue
+
+        has_approval = bool(
+            re.search(
+                r"\b("
+                r"motion\s+to\s+approve|"
+                r"approved|"
+                r"approval|"
+                r"passed|"
+                r"carried"
+                r")\b",
+                quote_norm,
+            )
+        )
+
+        has_result = bool(
+            re.search(
+                r"\b("
+                r"vote|"
+                r"unanimous|"
+                r"carried|"
+                r"passed"
+                r")\b",
+                quote_norm,
+            )
+        )
+
+        if (
+            has_approval
+            and has_result
+            and _quote_is_in_source(
+                quote,
+                notes,
+            )
+        ):
+            return quote
+
+    return None
+
+
+def _formal_status_supported(
+    status,
+    quote,
+):
+    """
+    Require the source excerpt to support the actual claimed
+    formal action type, not merely some formal-action word.
+
+    A passed motion whose stated purpose is to form/create/
+    establish something also supports APPROVED, because the
+    source itself provides both the motion purpose and result.
+    """
+
+    status = _action_norm(
+        status
+    )
+
+    normalized = _action_norm(
+        quote
+    )
+
+    patterns = {
+        "approved":
+            r"\b(?:approve|approves|approved|approval)\b",
+
+        "adopted":
+            r"\b(?:adopt|adopts|adopted|adoption)\b",
+
+        "authorized":
+            r"\b(?:authorize|authorizes|authorized|authorization)\b",
+
+        "awarded":
+            r"\b(?:award|awards|awarded)\b",
+
+        "directed":
+            r"\b(?:direct|directs|directed|directing)\b",
+
+        "rejected":
+            r"\b(?:reject|rejects|rejected|rejection)\b",
+
+        "denied":
+            r"\b(?:deny|denies|denied|denial)\b",
+
+        "appointed":
+            r"\b(?:appoint|appoints|appointed|appointment)\b",
+
+        "accepted":
+            r"\b(?:accept|accepts|accepted|acceptance)\b",
+
+        "passed":
+            r"\b(?:pass|passes|passed|carries|carried)\b",
+    }
+
+    pattern = patterns.get(
+        status
+    )
+
+    if (
+        pattern
+        and re.search(
+            pattern,
+            normalized,
+            re.I,
+        )
+    ):
+        return True
+
+    # Example:
+    #
+    #   A motion was made to form the committee.
+    #   The motion passed unanimously.
+    #
+    # This directly establishes approval of forming the
+    # committee even though the word "approved" is absent.
+    if status == "approved":
+        if (
+            re.search(
+                r"\bmotion\b"
+                r".*\b(?:form|create|establish)\b"
+                r".*\b(?:passed|carries|carried)\b",
+                normalized,
+                re.I,
+            )
+        ):
+            return True
+
+    return False
+
+
+def _canonical_formal_status_from_quote(
+    status,
+    quote,
+):
+    """
+    Prefer the specific action embodied in a passed motion over
+    the generic result word "passed".
+
+    Examples:
+
+      motion to approve X ... passed
+          -> approved
+
+      motion to adopt X ... passed
+          -> adopted
+
+      motion to appoint X ... passed
+          -> appointed
+
+      motion to form/create/establish a committee ... passed
+          -> approved
+
+    A source that says only "the motion passed" remains PASSED.
+    """
+
+    status = _action_norm(
+        status
+    )
+
+    if status != "passed":
+        return status
+
+    normalized = _action_norm(
+        quote
+    )
+
+    specific_patterns = (
+        (
+            "adopted",
+            r"\b(?:adopt|adopts|adopted|adoption)\b",
+        ),
+        (
+            "authorized",
+            r"\b(?:authorize|authorizes|authorized|authorization)\b",
+        ),
+        (
+            "awarded",
+            r"\b(?:award|awards|awarded)\b",
+        ),
+        (
+            "directed",
+            r"\b(?:direct|directs|directed|directing)\b",
+        ),
+        (
+            "rejected",
+            r"\b(?:reject|rejects|rejected|rejection)\b",
+        ),
+        (
+            "denied",
+            r"\b(?:deny|denies|denied|denial)\b",
+        ),
+        (
+            "appointed",
+            r"\b(?:appoint|appoints|appointed|appointment)\b",
+        ),
+        (
+            "accepted",
+            r"\b(?:accept|accepts|accepted|acceptance)\b",
+        ),
+        (
+            "approved",
+            r"\b(?:approve|approves|approved|approval)\b",
+        ),
+    )
+
+    for canonical, pattern in specific_patterns:
+        if re.search(
+            pattern,
+            normalized,
+            re.I,
+        ):
+            return canonical
+
+    # A passed motion whose stated purpose is to create/form/
+    # establish something is semantically an approval of that
+    # creation.
+    if re.search(
+        r"\bmotion\b"
+        r".*\b(?:form|create|establish)\b"
+        r".*\b(?:passed|carries|carried)\b",
+        normalized,
+        re.I,
+    ):
+        return "approved"
+
+    return status
+
+
+def _conflicted_generic_collective_formal_action(
+    item_number,
+    agenda_section,
+    status,
+    quote,
+    agenda_items,
+):
+    """
+    Return True when a formal action claim depends only on a
+    generic collective Consent Calendar disposition while the
+    source's explicit item numbers conflict with the official
+    agenda mapping.
+
+    This is intentionally narrow.
+
+    Example that MUST fail formal validation:
+
+      official topic -> item 21
+
+      source:
+        Discussion occurred regarding agenda items 17 and 18...
+        The Consent Calendar was approved unanimously.
+
+    The source supports discussion of the topic, but the generic
+    Consent vote cannot prove approval of official item 21.
+
+    A conflicted record may still retain a formal action when the
+    source contains its own topic-specific formal action, such as:
+
+      The motion to approve the historical-preservation
+      committee ... passed 4-1.
+    """
+
+    item_number = str(
+        item_number or ""
+    ).strip()
+
+    status = _action_norm(
+        status
+    )
+
+    if (
+        not item_number
+        or status
+        not in ACTION_FORMAL_STATUSES
+        or not quote
+    ):
+        return False
+
+    evidence_numbers = (
+        _evidence_agenda_item_numbers(
+            quote
+        )
+    )
+
+    if not evidence_numbers:
+        return False
+
+    # Exact official item reference is not conflicted.
+    if item_number in evidence_numbers:
+        return False
+
+    # Preserve the already-proven RSM-style unique Consent leaf
+    # shorthand:
+    #
+    #   official 5.6
+    #   source "Item 6"
+    if (
+        agenda_section
+        == "CONSENT CALENDAR"
+    ):
+        consent_labels = (
+            _consent_item_source_labels(
+                item_number,
+                agenda_items,
+            )
+        )
+
+        if (
+            consent_labels
+            & evidence_numbers
+        ):
+            return False
+
+    normalized = (
+        _evidence_text_norm(
+            quote
+        )
+    )
+
+    # We are guarding only generic COLLECTIVE Consent Calendar
+    # dispositions. Do not broaden this to ordinary motions.
+    generic_patterns = [
+        re.compile(
+            r"\bthe consent calendar "
+            r"(?:was )?approved\b",
+            re.I,
+        ),
+
+        re.compile(
+            r"\bconsent calendar "
+            r"(?:was )?approved\b",
+            re.I,
+        ),
+
+        re.compile(
+            r"\bapproved the consent calendar\b",
+            re.I,
+        ),
+
+        re.compile(
+            r"\bmotion to approve "
+            r"(?:the )?consent calendar\b",
+            re.I,
+        ),
+
+        re.compile(
+            r"\bconsent calendar "
+            r"(?:motion )?"
+            r"(?:passed|carries|carried)\b",
+            re.I,
+        ),
+    ]
+
+    matched_generic = False
+    remainder = normalized
+
+    for pattern in generic_patterns:
+        if pattern.search(
+            remainder
+        ):
+            matched_generic = True
+
+            remainder = pattern.sub(
+                " ",
+                remainder,
+            )
+
+    if not matched_generic:
+        return False
+
+    # If a separate, non-collective action phrase survives after
+    # removing the generic Consent vote, do NOT invalidate it.
+    #
+    # Historical Preservation is the important regression case:
+    #
+    #   motion to approve the committee ... passed 4-1
+    #
+    # remains valid even though its source numbering conflicts.
+    specific_patterns = {
+        "approved":
+            r"\b(?:"
+            r"motion\s+to\s+approve|"
+            r"approve|approves|approved|approval"
+            r")\b",
+
+        "adopted":
+            r"\b(?:adopt|adopts|adopted|adoption)\b",
+
+        "authorized":
+            r"\b(?:authorize|authorizes|authorized|authorization)\b",
+
+        "awarded":
+            r"\b(?:award|awards|awarded|awarding)\b",
+
+        "directed":
+            r"\b(?:direct|directs|directed|directing)\b",
+
+        "rejected":
+            r"\b(?:reject|rejects|rejected|rejection)\b",
+
+        "denied":
+            r"\b(?:deny|denies|denied|denial)\b",
+
+        "appointed":
+            r"\b(?:appoint|appoints|appointed|appointment)\b",
+
+        "accepted":
+            r"\b(?:accept|accepts|accepted|acceptance)\b",
+
+        "passed":
+            r"\b(?:pass|passes|passed|passing|carried)\b",
+    }
+
+    specific_pattern = (
+        specific_patterns.get(
+            status
+        )
+    )
+
+    if (
+        specific_pattern
+        and re.search(
+            specific_pattern,
+            remainder,
+            re.I,
+        )
+    ):
+        return False
+
+    return True
 
 
 def _formal_action_has_topic_support(
     topic,
     item_number,
     quote,
+    status=None,
 ):
-    quote_words = _action_words(quote)
-    topic_words = _action_words(topic)
+    quote_words = _action_words(
+        quote
+    )
 
-    overlap = len(
-        quote_words & topic_words
+    topic_words = _action_words(
+        topic
     )
 
     item_match = False
@@ -394,33 +2164,2116 @@ def _formal_action_has_topic_support(
         item_match = bool(
             re.search(
                 rf"\b{re.escape(item_number)}\b",
-                str(quote),
+                str(
+                    quote
+                ),
             )
         )
 
     has_action_language = bool(
-        quote_words & ACTION_EVIDENCE_TERMS
+        quote_words
+        & ACTION_EVIDENCE_TERMS
     )
 
+    if not has_action_language:
+        return False
+
+    if (
+        status
+        and not _formal_status_supported(
+            status,
+            quote,
+        )
+    ):
+        return False
+
     return (
-        has_action_language
-        and (
-            overlap >= 2
-            or item_match
+        item_match
+        or _topic_scope_supported(
+            topic,
+            quote,
         )
     )
 
 
-def _best_supported_nonformal_quote(
+def _single_line_transcript_turn_windows(
+    notes,
+    max_turns=18,
+    max_chars=16000,
+):
+    """
+    Return bounded exact contiguous source windows for transcripts
+    that arrive as one giant line separated by speaker markers.
+
+    Normal multi-line recording notes continue using the existing
+    line/block logic.
+    """
+
+    source = str(
+        notes or ""
+    )
+
+    if not source.strip():
+        return []
+
+    if len(
+        source.splitlines()
+    ) > 2:
+        return []
+
+    markers = list(
+        re.finditer(
+            r">>",
+            source,
+        )
+    )
+
+    if len(
+        markers
+    ) < 8:
+        return []
+
+    starts = [
+        0,
+        *[
+            marker.end()
+            for marker in markers
+        ],
+    ]
+
+    ends = [
+        *[
+            marker.start()
+            for marker in markers
+        ],
+        len(
+            source
+        ),
+    ]
+
+    windows = []
+    seen = set()
+
+    for start_index in range(
+        len(
+            starts
+        )
+    ):
+        for span in range(
+            1,
+            max_turns + 1,
+        ):
+            end_index = (
+                start_index
+                + span
+                - 1
+            )
+
+            if end_index >= len(
+                ends
+            ):
+                break
+
+            candidate = source[
+                starts[
+                    start_index
+                ]:
+                ends[
+                    end_index
+                ]
+            ].strip()
+
+            if not candidate:
+                continue
+
+            if len(
+                candidate
+            ) > max_chars:
+                break
+
+            if candidate in seen:
+                continue
+
+            seen.add(
+                candidate
+            )
+
+            windows.append(
+                candidate
+            )
+
+    return windows
+
+
+
+def _action_evidence_quote_is_bounded(
+    quote,
+    source,
+):
+    """
+    Reject a whole-meeting transcript as one evidence quotation.
+
+    This guard applies only to long single-line speaker-turn
+    transcripts. Normal structured notes are unaffected.
+    """
+
+    quote_text = str(
+        quote or ""
+    ).strip()
+
+    source_text = str(
+        source or ""
+    )
+
+    if not quote_text:
+        return False
+
+    if (
+        len(
+            source_text.splitlines()
+        ) <= 2
+        and source_text.count(
+            ">>"
+        ) >= 8
+        and len(
+            source_text
+        ) >= 20000
+    ):
+        return (
+            len(
+                quote_text
+            )
+            <= 16000
+        )
+
+    return True
+
+
+
+def _turn_window_topic_identity_span(
+    topic,
+    candidate,
+    max_span_chars=3000,
+):
+    """
+    Locate the strongest local cluster of meaningful topic words.
+
+    Return (start, end, matched_words) only when enough distinct
+    topic identity words occur close together.
+
+    This prevents generic overlap such as:
+
+        Electric Bicycle Municipal Code Amendments
+
+    being matched by an unrelated block containing only:
+
+        municipal code
+
+    It also lets final-action validation distinguish a vote from
+    the PREVIOUS agenda item from a vote that follows the current
+    item's actual identity.
+    """
+
+    normalized = _action_norm(
+        candidate
+    )
+
+    topic_words = sorted(
+        _action_words(
+            topic
+        )
+    )
+
+    if not topic_words:
+        return None
+
+    occurrences = []
+
+    for word in topic_words:
+        for match in re.finditer(
+            rf"\b{re.escape(word)}[a-z0-9]*\b",
+            normalized,
+            re.I,
+        ):
+            occurrences.append(
+                (
+                    match.start(),
+                    match.end(),
+                    word,
+                )
+            )
+
+    if not occurrences:
+        return None
+
+    occurrences.sort(
+        key=lambda item: item[0]
+    )
+
+    topic_count = len(
+        topic_words
+    )
+
+    if topic_count <= 2:
+        required = topic_count
+
+    elif topic_count <= 4:
+        required = 3
+
+    else:
+        required = 3
+
+    best = None
+
+    for left in range(
+        len(
+            occurrences
+        )
+    ):
+        matched = set()
+
+        for right in range(
+            left,
+            len(
+                occurrences
+            ),
+        ):
+            start = occurrences[
+                left
+            ][
+                0
+            ]
+
+            end = occurrences[
+                right
+            ][
+                1
+            ]
+
+            if (
+                end
+                - start
+                > max_span_chars
+            ):
+                break
+
+            matched.add(
+                occurrences[
+                    right
+                ][
+                    2
+                ]
+            )
+
+            if len(
+                matched
+            ) < required:
+                continue
+
+            candidate_result = (
+                start,
+                end,
+                frozenset(
+                    matched
+                ),
+            )
+
+            if best is None:
+                best = candidate_result
+                continue
+
+            best_start, best_end, best_words = (
+                best
+            )
+
+            # Prefer:
+            #   1. more distinct topic words;
+            #   2. tighter cluster;
+            #   3. later cluster when otherwise tied.
+            #
+            # The final tie-break is useful when an earlier public
+            # comment mentions one or two related words but the
+            # actual agenda-item title appears later.
+            score = (
+                len(
+                    matched
+                ),
+                -(
+                    end
+                    - start
+                ),
+                start,
+            )
+
+            best_score = (
+                len(
+                    best_words
+                ),
+                -(
+                    best_end
+                    - best_start
+                ),
+                best_start,
+            )
+
+            if score > best_score:
+                best = candidate_result
+
+    return best
+
+
+def _local_topic_anchor_supported(
+    topic,
+    candidate,
+):
+    """
+    Require strong local topical identity without depending entirely
+    on the editorial topic label matching the transcript vocabulary.
+
+    This is intentionally conservative. Generic words such as
+    "public", "comment", "resident", and "council" do not count as
+    topical anchors.
+    """
+    if _turn_window_topic_identity_span(
+        topic,
+        candidate,
+    ):
+        return True
+
+    topic_words = set(
+        _action_words(
+            topic
+        )
+    )
+
+    candidate_words = set(
+        _action_words(
+            candidate
+        )
+    )
+
+    generic_words = {
+        "action",
+        "advocacy",
+        "city",
+        "comment",
+        "comments",
+        "council",
+        "public",
+        "resident",
+        "residents",
+        "speaker",
+    }
+
+    topic_words -= generic_words
+    candidate_words -= generic_words
+
+    overlap = len(
+        topic_words
+        & candidate_words
+    )
+
+    topic_norm = _action_norm(
+        topic
+    )
+
+    candidate_norm = _action_norm(
+        candidate
+    )
+
+    # Treat common spelling/tokenization variants of e-bike as one
+    # strong topical anchor.
+    topic_has_ebike = bool(
+        re.search(
+            r"\be[\s-]*bike\b|\bebike\b",
+            topic_norm,
+            re.I,
+        )
+    )
+
+    candidate_has_ebike = bool(
+        re.search(
+            r"\be[\s-]*bike(?:s)?\b|\bebikes?\b",
+            candidate_norm,
+            re.I,
+        )
+    )
+
+    if (
+        topic_has_ebike
+        and candidate_has_ebike
+    ):
+        overlap += 2
+
+    if len(
+        topic_words
+    ) <= 2:
+        required = 1
+    else:
+        required = 2
+
+    return overlap >= required
+
+
+
+def _raw_council_commentary_supported(
+    topic,
+    candidate,
+):
+    """
+    Recognize substantive topic-local commentary by an identified
+    Council member in a raw speaker-turn transcript.
+
+    This is deliberately different from a resident public comment:
+    a nearby speaker cue must identify a Council member / Mayor Pro
+    Tem, or the speaking turn itself must explicitly refer to the
+    Council's position.
+    """
+    turns = [
+        turn.strip()
+        for turn in re.split(
+            r"\s*>>\s*",
+            str(
+                candidate or ""
+            ),
+        )
+        if turn.strip()
+    ]
+
+    if not turns:
+        return False
+
+    for index, turn in enumerate(
+        turns
+    ):
+        if not _local_topic_anchor_supported(
+            topic,
+            turn,
+        ):
+            continue
+
+        normalized = _action_norm(
+            turn
+        )
+
+        if len(
+            normalized
+        ) < 120:
+            continue
+
+        prior = " ".join(
+            turns[
+                max(
+                    0,
+                    index - 2,
+                ):
+                index
+            ]
+        )
+
+        prior_norm = _action_norm(
+            prior
+        )
+
+        speaker_supported = bool(
+            re.search(
+                r"\b(?:"
+                r"council\s+member|"
+                r"mayor\s+pro\s+tem"
+                r")\b",
+                prior_norm,
+                re.I,
+            )
+            or re.search(
+                r"\b(?:"
+                r"this|the"
+                r")\s+(?:entire\s+)?council\b",
+                normalized,
+                re.I,
+            )
+        )
+
+        if not speaker_supported:
+            continue
+
+        substantive = re.search(
+            r"\b(?:"
+            r"agree|"
+            r"believe|"
+            r"clear|"
+            r"concern|"
+            r"concerns|"
+            r"continue|"
+            r"difficult|"
+            r"idea|"
+            r"ideas|"
+            r"implement|"
+            r"law|"
+            r"laws|"
+            r"need|"
+            r"needs|"
+            r"policy|"
+            r"problem|"
+            r"problems|"
+            r"progress|"
+            r"reform|"
+            r"rule|"
+            r"rules|"
+            r"safety|"
+            r"support|"
+            r"supported|"
+            r"think"
+            r")\b",
+            normalized,
+            re.I,
+        )
+
+        if substantive:
+            return True
+
+    return False
+
+
+
+def _best_supported_raw_council_commentary_quote(
     topic,
     notes,
 ):
     """
-    Search recording-derived notes for source-supported
-    discussion/consideration evidence for a specific topic.
+    Recover a compact exact speaker-turn window proving substantive
+    Council-member commentary on a topic.
 
-    Used only when an agenda-mapped action record was paired
-    with evidence that does not actually describe that topic.
+    Resident testimony itself cannot satisfy this helper.
+    """
+
+    if re.match(
+        r"^\s*public\s+comment\b",
+        str(
+            topic or ""
+        ),
+        re.I,
+    ):
+        return None
+
+    if not _single_line_transcript_turn_windows(
+        notes
+    ):
+        return None
+
+    turns = [
+        turn.strip()
+        for turn in re.split(
+            r"\s*>>\s*",
+            str(
+                notes or ""
+            ),
+        )
+        if turn.strip()
+    ]
+
+    candidates = []
+
+    topic_words = set(
+        _action_words(
+            topic
+        )
+    )
+
+    for index, turn in enumerate(
+        turns
+    ):
+        if not _local_topic_anchor_supported(
+            topic,
+            turn,
+        ):
+            continue
+
+        start = max(
+            0,
+            index - 2,
+        )
+
+        candidate = " >> ".join(
+            turns[
+                start:
+                index + 1
+            ]
+        )
+
+        if not _raw_council_commentary_supported(
+            topic,
+            candidate,
+        ):
+            continue
+
+        candidate_words = set(
+            _action_words(
+                candidate
+            )
+        )
+
+        overlap = len(
+            topic_words
+            & candidate_words
+        )
+
+        score = (
+            overlap
+            * 1000
+            - len(
+                _action_norm(
+                    candidate
+                )
+            )
+        )
+
+        candidates.append(
+            (
+                score,
+                candidate,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item:
+            item[0],
+        reverse=True,
+    )
+
+    return candidates[0][1]
+
+
+
+
+
+def _best_supported_local_public_comment_quote(
+    topic,
+    notes,
+):
+    """
+    Recover one exact public-comment speaker turn from a raw
+    single-line transcript.
+
+    Public-comment state is tracked explicitly so later Council
+    reports or discussion cannot be mistaken for the resident's
+    original comment.
+
+    An explicitly labeled public-commenter turn may satisfy a
+    broader editorial public-comment topic when at least two
+    meaningful topic words occur in that same speaker turn.
+    """
+    if not _single_line_transcript_turn_windows(
+        notes
+    ):
+        return None
+
+    turns = [
+        turn.strip()
+        for turn in re.split(
+            r"\s*>>\s*",
+            str(
+                notes or ""
+            ),
+        )
+        if turn.strip()
+    ]
+
+    topic_words = _action_words(
+        topic
+    )
+
+    if len(
+        topic_words
+    ) < 2:
+        return None
+
+    open_pattern = re.compile(
+        r"\b(?:"
+        r"move\s+on\s+to|"
+        r"open|"
+        r"begin|"
+        r"start|"
+        r"takes\s+us\s+to"
+        r")\b"
+        r"[^.!?\n]{0,120}"
+        r"\bpublic\s+comments?\b"
+        r"|"
+        r"\bpublic\s+comments?\b"
+        r"[^.!?\n]{0,120}"
+        r"\b(?:open|begin|start)\b",
+        re.I,
+    )
+
+    close_pattern = re.compile(
+        r"\bpublic\s+comments?\b"
+        r"[^.!?\n]{0,100}"
+        r"\b(?:close|closed)\b"
+        r"|"
+        r"\b(?:close|closed)\b"
+        r"[^.!?\n]{0,100}"
+        r"\bpublic\s+comments?\b",
+        re.I,
+    )
+
+    explicit_commenter_pattern = re.compile(
+        r"\b(?:"
+        r"first\s+public\s+commenter|"
+        r"next\s+public\s+commenter|"
+        r"our\s+next\s+public\s+commenter|"
+        r"public\s+commenter\s+is"
+        r")\b",
+        re.I,
+    )
+
+    candidates = []
+    in_public_comment = False
+
+    for turn in turns:
+        normalized = _action_norm(
+            turn
+        )
+
+        if open_pattern.search(
+            normalized
+        ):
+            in_public_comment = True
+
+        candidate_words = (
+            _action_words(
+                turn
+            )
+        )
+
+        overlap = len(
+            topic_words
+            & candidate_words
+        )
+
+        explicit_commenter = bool(
+            explicit_commenter_pattern.search(
+                normalized
+            )
+        )
+
+        locally_supported = (
+            _local_topic_anchor_supported(
+                topic,
+                turn,
+            )
+            or (
+                explicit_commenter
+                and overlap >= 2
+            )
+        )
+
+        if (
+            in_public_comment
+            and locally_supported
+        ):
+            score = (
+                overlap
+                * 1000
+                + (
+                    500
+                    if explicit_commenter
+                    else 0
+                )
+                - len(
+                    normalized
+                )
+            )
+
+            candidates.append(
+                (
+                    score,
+                    turn,
+                )
+            )
+
+        if close_pattern.search(
+            normalized
+        ):
+            in_public_comment = False
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item:
+            item[
+                0
+            ],
+        reverse=True,
+    )
+
+    return candidates[
+        0
+    ][
+        1
+    ]
+
+
+
+
+def _staff_followup_language_supported(
+    value,
+):
+    """
+    Require explicit staff-follow-up language.
+    """
+    normalized = _action_norm(
+        value
+    )
+
+    patterns = (
+        r"\b(?:city\s+)?staff\b"
+        r"[^.!?\n]{0,180}"
+        r"\b(?:"
+        r"follow\s+up|"
+        r"followup|"
+        r"respond|"
+        r"report\s+back|"
+        r"return|"
+        r"look\s+into"
+        r")\b",
+
+        r"\b(?:"
+        r"follow\s+up|"
+        r"followup|"
+        r"respond|"
+        r"report\s+back|"
+        r"return|"
+        r"look\s+into"
+        r")\b"
+        r"[^.!?\n]{0,180}"
+        r"\b(?:city\s+)?staff\b",
+    )
+
+    return any(
+        re.search(
+            pattern,
+            normalized,
+            re.I,
+        )
+        for pattern in patterns
+    )
+
+
+
+
+def _best_supported_local_staff_followup_quote(
+    topic,
+    notes,
+    agenda_title="",
+):
+    """
+    Recover topic-local staff-follow-up evidence from a raw
+    single-line transcript.
+
+    The follow-up language must be within two speaker turns of
+    strong current-topic identity.
+
+    For an agenda-mapped topic, that local neighborhood must also
+    support the official agenda identity. This prevents a nearby
+    agenda item from inheriting "staff will return" merely because
+    it happens to mention a generic program name such as CIP.
+    """
+    turn_windows = (
+        _single_line_transcript_turn_windows(
+            notes
+        )
+    )
+
+    if not turn_windows:
+        return None
+
+    topic_words = _action_words(
+        topic
+    )
+
+    if len(
+        topic_words
+    ) < 2:
+        return None
+
+    candidates = []
+
+    for candidate in turn_windows:
+        if not _action_evidence_quote_is_bounded(
+            candidate,
+            notes,
+        ):
+            continue
+
+        turns = [
+            turn.strip()
+            for turn in re.split(
+                r"\s*>>\s*",
+                candidate,
+            )
+            if turn.strip()
+        ]
+
+        followup_indexes = [
+            index
+            for index, turn
+            in enumerate(
+                turns
+            )
+            if _staff_followup_language_supported(
+                turn
+            )
+        ]
+
+        if not followup_indexes:
+            continue
+
+        local = False
+
+        for index in followup_indexes:
+            # Identity can come only from the same follow-up turn
+            # or the two immediately preceding speaker turns.
+            start = max(
+                0,
+                index - 2,
+            )
+
+            end = (
+                index + 1
+            )
+
+            neighborhood = (
+                " >> ".join(
+                    turns[
+                        start:end
+                    ]
+                )
+            )
+
+            if not _local_topic_anchor_supported(
+                topic,
+                neighborhood,
+            ):
+                continue
+
+            if not _topic_scope_supported(
+                topic,
+                neighborhood,
+            ):
+                continue
+
+            if (
+                agenda_title
+                and not _turn_window_agenda_identity_supported(
+                    topic,
+                    agenda_title,
+                    neighborhood,
+                )
+            ):
+                continue
+
+            local = True
+            break
+
+        if not local:
+            continue
+
+        candidate_words = _action_words(
+            candidate
+        )
+
+        overlap = len(
+            topic_words
+            & candidate_words
+        )
+
+        score = (
+            overlap
+            * 1000
+            - len(
+                _action_norm(
+                    candidate
+                )
+            )
+        )
+
+        candidates.append(
+            (
+                score,
+                candidate,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item:
+            item[
+                0
+            ],
+        reverse=True,
+    )
+
+    return candidates[
+        0
+    ][
+        1
+    ]
+
+
+
+
+
+def _turn_window_agenda_identity_supported(
+    topic,
+    agenda_title,
+    candidate,
+):
+    """
+    Require a strong LOCAL topic identity cluster inside a raw
+    transcript window.
+
+    The editorial topic is deliberately the primary identity
+    source because it is normally more specific than boilerplate
+    official-title language such as city names, "municipal code",
+    or "professional services agreement".
+    """
+
+    identity = (
+        _turn_window_topic_identity_span(
+            topic,
+            candidate,
+        )
+    )
+
+    if not identity:
+        return False
+
+    # Truly compound parent topics retain the existing full-scope
+    # protection. This preserves the ALPR + Digital Signage rule.
+    components = (
+        _action_topic_components(
+            topic
+        )
+    )
+
+    if (
+        len(
+            components
+        ) > 1
+        and not _topic_scope_supported(
+            topic,
+            candidate,
+        )
+    ):
+        return False
+
+    return True
+
+def _agenda_identity_supported_for_source(
+    topic,
+    agenda_title,
+    quote,
+    source,
+):
+    """
+    Apply the strong identity rule only to raw single-line
+    speaker-turn transcripts.
+
+    Structured multi-line notes retain their existing behavior.
+    """
+
+    source_text = str(
+        source or ""
+    )
+
+    if (
+        len(
+            source_text.splitlines()
+        ) <= 2
+        and source_text.count(
+            ">>"
+        ) >= 8
+    ):
+        return (
+            _turn_window_agenda_identity_supported(
+                topic,
+                agenda_title,
+                quote,
+            )
+        )
+
+    return True
+
+
+def _turn_window_formal_finality_supported(
+    topic,
+    status,
+    candidate,
+    agenda_title="",
+):
+    """
+    Require strong local topic identity and final-action evidence
+    occurring after that identity.
+
+    This prevents a previous agenda item's vote from validating the
+    next item merely because one bounded window contains both.
+    """
+
+    identity = (
+        _turn_window_topic_identity_span(
+            topic,
+            candidate,
+        )
+    )
+
+    if not identity:
+        return False
+
+    identity_start, identity_end, _ = (
+        identity
+    )
+
+    normalized = _action_norm(
+        candidate
+    )
+
+    status = _action_norm(
+        status
+    )
+
+    if not _formal_status_supported(
+        status,
+        candidate,
+    ):
+        return False
+
+    result_pattern = re.compile(
+        r"\b(?:that\s+motion|motion)\b"
+        r".{0,140}"
+        r"\b(?:passes|passed|carries|carried)\b"
+        r"|"
+        r"\b(?:passes|passed|carries|carried)\s+unanimously\b",
+        re.I,
+    )
+
+    result_positions = [
+        match.start()
+        for match in result_pattern.finditer(
+            normalized
+        )
+    ]
+
+    result_after_identity = any(
+        position
+        >= identity_end
+        for position in result_positions
+    )
+
+    if status == "passed":
+        return result_after_identity
+
+    # A direct completed council action may stand alone, but it
+    # must itself occur after the current topic has been identified.
+    direct_pattern = re.compile(
+        r"\b(?:city\s+council|council)\b"
+        r".{0,180}"
+        r"\b(?:"
+        r"approved|"
+        r"adopted|"
+        r"authorized|"
+        r"awarded|"
+        r"directed|"
+        r"rejected|"
+        r"denied|"
+        r"appointed|"
+        r"accepted"
+        r")\b",
+        re.I,
+    )
+
+    direct_after_identity = any(
+        match.start()
+        >= identity_end
+        for match in direct_pattern.finditer(
+            normalized
+        )
+    )
+
+    if direct_after_identity:
+        return True
+
+    # Agenda/recommendation wording such as "award of..." or
+    # "recommendation is to award..." becomes a completed formal
+    # disposition only when a later local motion result establishes
+    # that Council acted on it.
+    return result_after_identity
+
+def _best_supported_formal_action_quote(
+    topic,
+    status,
+    notes,
+    agenda_title="",
+):
+    """
+    Recover an exact local source excerpt supporting a formal
+    action.
+
+    Structured summaries use blank-line source blocks.
+    Single-line transcripts use bounded speaker-turn windows and
+    strong topic identity.
+    """
+
+    candidates = []
+
+    turn_windows = (
+        _single_line_transcript_turn_windows(
+            notes
+        )
+    )
+
+    if turn_windows:
+        source_candidates = (
+            turn_windows
+        )
+
+    else:
+        source_candidates = re.split(
+            r"\n\s*\n",
+            str(
+                notes or ""
+            ),
+        )
+
+    topic_words = _action_words(
+        topic
+    )
+
+    identity_words = _action_words(
+        agenda_title or topic
+    )
+
+    for block in source_candidates:
+        candidate = block.strip()
+
+        if not candidate:
+            continue
+
+        if not _topic_scope_supported(
+            topic,
+            candidate,
+        ):
+            continue
+
+        if (
+            turn_windows
+            and not _turn_window_agenda_identity_supported(
+                topic,
+                agenda_title,
+                candidate,
+            )
+        ):
+            continue
+
+        if not _formal_status_supported(
+            status,
+            candidate,
+        ):
+            continue
+
+        if (
+            turn_windows
+            and not _turn_window_formal_finality_supported(
+                topic,
+                status,
+                candidate,
+                agenda_title=agenda_title,
+            )
+        ):
+            continue
+
+        candidate_words = (
+            _action_words(
+                candidate
+            )
+        )
+
+        overlap = len(
+            topic_words
+            & candidate_words
+        )
+
+        identity_overlap = len(
+            identity_words
+            & candidate_words
+        )
+
+        if turn_windows:
+            # In raw transcripts, prefer precise agenda identity
+            # much more strongly than merely choosing the shortest
+            # window.
+            score = (
+                identity_overlap
+                * 1000
+                + overlap
+                * 100
+                - len(
+                    _action_norm(
+                        candidate
+                    )
+                )
+            )
+
+        else:
+            score = (
+                overlap
+                * 100
+                - len(
+                    _action_norm(
+                        candidate
+                    )
+                )
+            )
+
+        candidates.append(
+            (
+                score,
+                candidate,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    return candidates[0][1]
+
+def _compound_topic_has_substantive_line_support(
+    topic,
+    evidence,
+):
+    """
+    For an explicit compound topic, require each component to
+    appear in at least one substantive source line.
+
+    A Markdown heading by itself is not enough.
+
+    Example:
+
+      Staff was directed regarding digital signage.
+      Discussion on ALPR:
+
+    cannot by itself prove substantive discussion of both
+    components.
+
+    But:
+
+      Staff was directed regarding digital signage.
+      The meeting included a discussion regarding ALPR.
+
+    can support a conservative combined "discussed" status.
+    """
+
+    components = (
+        _action_topic_components(
+            topic
+        )
+    )
+
+    if len(
+        components
+    ) <= 1:
+        return True
+
+    substantive_context = re.compile(
+        r"\b(?:"
+        r"council|"
+        r"councilmember|"
+        r"staff|"
+        r"meeting|"
+        r"motion|"
+        r"vote|"
+        r"resident|"
+        r"speaker|"
+        r"mayor|"
+        r"members?"
+        r")\b",
+        re.I,
+    )
+
+    lines = [
+        line
+        for line in str(
+            evidence or ""
+        ).splitlines()
+        if line.strip()
+    ]
+
+    for component in components:
+        component_supported = False
+
+        for line in lines:
+            if not substantive_context.search(
+                _action_norm(
+                    line
+                )
+            ):
+                continue
+
+            line_words = (
+                _action_words(
+                    line
+                )
+            )
+
+            if (
+                component
+                & line_words
+            ):
+                component_supported = True
+                break
+
+        if not component_supported:
+            return False
+
+    return True
+
+
+def _supplemental_component_formal_action(
+    topic,
+    status,
+    quote,
+    source_name,
+    agenda_items,
+):
+    """
+    Recover one component-specific formal action from an exact
+    source quote when that formal action does NOT apply to the
+    full compound coverage topic.
+
+    This is deliberately conservative.
+
+    Requirements:
+
+      - source must be recording-derived notes;
+      - parent topic must have multiple explicit components;
+      - claimed formal status must be supported by the quote;
+      - quote must NOT support the full parent topic;
+      - exactly one meaningful component must be supported;
+      - that component must resolve to an official agenda item.
+
+    Example:
+
+      parent:
+        ALPR and Digital Signage
+
+      evidence:
+        Staff was directed to return with a proposal regarding
+        additional digital signage.
+
+      supplemental record:
+        Digital Signage -> DIRECTED
+
+    The parent record remains free to fall back to DISCUSSED.
+    """
+
+    status = _action_norm(
+        status
+    )
+
+    if (
+        source_name != "notes"
+        or status
+        not in ACTION_FORMAL_STATUSES
+        or not quote
+    ):
+        return None
+
+    labels = (
+        _action_topic_component_labels(
+            topic
+        )
+    )
+
+    if len(
+        labels
+    ) <= 1:
+        return None
+
+    if not _formal_status_supported(
+        status,
+        quote,
+    ):
+        return None
+
+    # If the exact formal evidence already supports the entire
+    # parent topic, no supplemental component record is needed.
+    if _topic_scope_supported(
+        topic,
+        quote,
+    ):
+        return None
+
+    candidates = []
+
+    for label in labels:
+        words = _action_words(
+            label
+        )
+
+        # Avoid manufacturing standalone records from weak
+        # one-word conjunction fragments such as "Pesticide".
+        if len(
+            words
+        ) < 2:
+            continue
+
+        agenda_item = (
+            _resolve_agenda_item(
+                label,
+                "",
+                agenda_items,
+            )
+        )
+
+        if not agenda_item:
+            continue
+
+        if not _topic_scope_supported(
+            label,
+            quote,
+        ):
+            continue
+
+        canonical_status = (
+            _canonical_formal_status_from_quote(
+                status,
+                quote,
+            )
+        )
+
+        if not _formal_action_has_topic_support(
+            label,
+            agenda_item[
+                "item_number"
+            ],
+            quote,
+            canonical_status,
+        ):
+            continue
+
+        evidence_item_numbers = (
+            _evidence_agenda_item_numbers(
+                quote
+            )
+        )
+
+        item_number = (
+            agenda_item[
+                "item_number"
+            ]
+        )
+
+        agenda_section = (
+            agenda_item[
+                "section"
+            ]
+        )
+
+        evidence_matches_item = bool(
+            item_number
+            and item_number
+            in evidence_item_numbers
+        )
+
+        if (
+            not evidence_matches_item
+            and item_number
+            and agenda_section
+            == "CONSENT CALENDAR"
+            and evidence_item_numbers
+        ):
+            consent_labels = (
+                _consent_item_source_labels(
+                    item_number,
+                    agenda_items,
+                )
+            )
+
+            evidence_matches_item = bool(
+                consent_labels
+                & evidence_item_numbers
+            )
+
+        agenda_linkage_conflict = bool(
+            item_number
+            and evidence_item_numbers
+            and not evidence_matches_item
+        )
+
+        validation_note = (
+            "Component-specific formal action recovered "
+            "from exact recording-derived evidence because "
+            "the formal action did not apply to the full "
+            "compound coverage topic."
+        )
+
+        if agenda_linkage_conflict:
+            validation_note += (
+                " Source item numbering conflicts with the "
+                "official agenda mapping; agenda-section "
+                "timing must not be inferred."
+            )
+
+        candidates.append(
+            {
+                "topic":
+                    label,
+
+                "item_number":
+                    item_number,
+
+                "agenda_section":
+                    agenda_section,
+
+                "agenda_linkage_conflict":
+                    agenda_linkage_conflict,
+
+                "evidence_item_numbers":
+                    sorted(
+                        evidence_item_numbers,
+                        key=_agenda_item_sort_key,
+                    ),
+
+                "agenda_title":
+                    agenda_item[
+                        "title"
+                    ],
+
+                "action_status":
+                    canonical_status,
+
+                "evidence_source":
+                    "notes",
+
+                "evidence_quote":
+                    quote,
+
+                "validated":
+                    True,
+
+                "validation_note":
+                    validation_note,
+            }
+        )
+
+    # Ambiguous subset support fails closed.
+    if len(
+        candidates
+    ) != 1:
+        return None
+
+    return candidates[0]
+
+
+def _nonformal_status_from_quote(
+    topic,
+    candidate,
+    require_local_identity=False,
+):
+    """
+    Classify an exact excerpt as discussion/consideration only when
+    the source actually establishes meeting treatment of the topic.
+
+    Treatment language in raw transcripts must be local to the
+    current topic identity. It cannot reach across a completed
+    sentence from a previous agenda item.
+    """
+
+    normalized = _action_norm(
+        candidate
+    )
+
+    identity_start = 0
+    identity_end = 0
+
+    if require_local_identity:
+        identity = (
+            _turn_window_topic_identity_span(
+                topic,
+                candidate,
+            )
+        )
+
+        if not identity:
+            return None
+
+        identity_start = identity[0]
+        identity_end = identity[1]
+
+
+
+    def local_match(pattern):
+        for match in re.finditer(
+            pattern,
+            normalized,
+            re.I,
+        ):
+            if not require_local_identity:
+                return True
+
+            # Treatment that begins at/after the current topic
+            # identity is plainly local.
+            if match.start() >= identity_start:
+                return True
+
+            # Treatment may naturally introduce the topic:
+            #
+            #   "give us an update on the Capital Improvement Plan"
+            #
+            # Permit that only when the treatment and topic are in
+            # the same sentence/clause neighborhood.
+            if match.end() >= identity_start:
+                return True
+
+            gap = normalized[
+                match.end():
+                identity_start
+            ]
+
+            if (
+                len(
+                    gap
+                ) <= 180
+                and not re.search(
+                    r"[.!?]",
+                    gap,
+                )
+            ):
+                return True
+
+        return False
+
+
+
+    # Explicit discussion wording.
+    if local_match(
+        r"\b(?:"
+        r"discussion|"
+        r"discussed|"
+        r"discussing"
+        r")\b"
+    ):
+        return "discussed"
+
+
+
+    # Presentation/update evidence.
+    #
+    # [^.!?\n] deliberately prevents one agenda item's treatment
+    # phrase from reaching across a sentence into the next item's
+    # title.
+    presentation_patterns = (
+        r"\b(?:"
+        r"provide|provides|provided|providing|"
+        r"give|gives|gave|giving|"
+        r"present|presents|presented|presenting|"
+        r"receive|receives|received|receiving"
+        r")\b"
+        r"[^.!?\n]{0,180}?"
+        r"\b(?:"
+        r"update|presentation|briefing"
+        r")\b",
+
+        r"\b(?:"
+        r"concludes|concluded|concluding"
+        r")\b"
+        r"[^.!?\n]{0,100}?"
+        r"\b(?:"
+        r"presentation|briefing|update"
+        r")\b",
+
+        r"\b(?:"
+        r"presentation|briefing"
+        r")\b"
+        r"[^.!?\n]{0,100}?"
+        r"\b(?:"
+        r"concludes|concluded"
+        r")\b",
+    )
+
+
+    if any(
+        local_match(
+            pattern
+        )
+        for pattern in presentation_patterns
+    ):
+        return "discussed"
+
+
+
+    # Generic nouns such as:
+    #
+    #   "priority consideration for grants"
+    #
+    # are not Council consideration.
+    consideration_patterns = (
+        r"\b(?:"
+        r"city\s+council|"
+        r"council"
+        r")\b"
+        r"[^.!?\n]{0,180}?"
+        r"\b(?:"
+        r"considered|considering"
+        r")\b",
+
+        r"\b(?:"
+        r"considered|considering"
+        r")\b"
+        r"[^.!?\n]{0,180}?"
+        r"\b(?:"
+        r"by\s+"
+        r")?"
+        r"(?:the\s+)?"
+        r"(?:"
+        r"city\s+council|"
+        r"council"
+        r")\b",
+    )
+
+
+    if any(
+        local_match(
+            pattern
+        )
+        for pattern in consideration_patterns
+    ):
+        return "considered"
+
+
+    return None
+
+def _best_supported_nonformal_quote(
+    topic,
+    notes,
+    agenda_title="",
+    agenda_item_number="",
+):
+    """
+    Search recording-derived notes for an exact excerpt proving
+    nonformal treatment of the full topic.
+
+    Single-line transcripts additionally require strong topic /
+    agenda-title identity.
+    """
+
+    if (
+        not agenda_title
+        and re.match(
+            r"^\s*public\s+comment\b",
+            str(
+                topic or ""
+            ),
+            re.I,
+        )
+    ):
+        return None
+
+
+    topic_words = _action_words(
+        topic
+    )
+
+    if len(
+        topic_words
+    ) < 2:
+        return None
+
+    turn_windows = (
+        _single_line_transcript_turn_windows(
+            notes
+        )
+    )
+
+    candidates = []
+
+    if turn_windows:
+        source_candidates = [
+            candidate
+            for candidate in turn_windows
+        ]
+
+    else:
+        raw_lines = str(
+            notes or ""
+        ).splitlines()
+
+        source_candidates = []
+
+        for start in range(
+            len(
+                raw_lines
+            )
+        ):
+            if not raw_lines[
+                start
+            ].strip():
+                continue
+
+            for span in range(
+                1,
+                13,
+            ):
+                end = start + span
+
+                if end > len(
+                    raw_lines
+                ):
+                    break
+
+                candidate = "\n".join(
+                    raw_lines[
+                        start:end
+                    ]
+                ).strip()
+
+                if candidate:
+                    source_candidates.append(
+                        candidate
+                    )
+
+    identity_words = _action_words(
+        agenda_title or topic
+    )
+
+    for candidate in source_candidates:
+        if _candidate_has_foreign_agenda_transition(
+            candidate,
+            agenda_item_number,
+        ):
+            continue
+
+        if not _topic_scope_supported(
+            topic,
+            candidate,
+        ):
+            continue
+
+        if (
+            turn_windows
+            and not _turn_window_agenda_identity_supported(
+                topic,
+                agenda_title,
+                candidate,
+            )
+        ):
+            continue
+
+        if not _compound_topic_has_substantive_line_support(
+            topic,
+            candidate,
+        ):
+            continue
+
+        normalized = _action_norm(
+            candidate
+        )
+
+        status = _nonformal_status_from_quote(
+            topic,
+            candidate,
+            require_local_identity=bool(
+                turn_windows
+            ),
+        )
+
+        if not status:
+            continue
+
+        candidate_words = (
+            _action_words(
+                candidate
+            )
+        )
+
+        overlap = len(
+            topic_words
+            & candidate_words
+        )
+
+        identity_overlap = len(
+            identity_words
+            & candidate_words
+        )
+
+        if turn_windows:
+            score = (
+                identity_overlap
+                * 1000
+                + overlap
+                * 100
+                - len(
+                    normalized
+                )
+            )
+
+        else:
+            score = (
+                overlap
+                * 100
+                - len(
+                    normalized
+                )
+            )
+
+        candidates.append(
+            (
+                score,
+                status,
+                candidate,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    _, status, quote = (
+        candidates[0]
+    )
+
+    return {
+        "action_status":
+            status,
+
+        "evidence_quote":
+            quote,
+    }
+
+def _best_supported_public_comment_quote(
+    topic,
+    notes,
+):
+    """
+    Recover an exact recording-note excerpt for a public-comment
+    topic when model output paraphrased rather than quoted the
+    source.
+
+    This helper validates only the existence/content of the
+    comment. It does not infer any Council action.
     """
 
     topic_words = _action_words(
@@ -436,8 +4289,6 @@ def _best_supported_nonformal_quote(
 
     candidates = []
 
-    # Examine single lines and two-line windows so a markdown
-    # topic heading can remain attached to the sentence below it.
     for i in range(
         len(raw_lines)
     ):
@@ -445,23 +4296,40 @@ def _best_supported_nonformal_quote(
             raw_lines[i],
         ]
 
-        if i + 1 < len(raw_lines):
+        if i + 1 < len(
+            raw_lines
+        ):
             windows.append(
                 raw_lines[i]
                 + "\n"
                 + raw_lines[i + 1]
             )
 
+        if i + 2 < len(
+            raw_lines
+        ):
+            windows.append(
+                raw_lines[i]
+                + "\n"
+                + raw_lines[i + 1]
+                + "\n"
+                + raw_lines[i + 2]
+            )
+
         for candidate in windows:
-            normalized = _action_norm(
-                candidate
+            normalized = (
+                _evidence_text_norm(
+                    candidate
+                )
             )
 
             if not normalized:
                 continue
 
-            candidate_words = _action_words(
-                candidate
+            candidate_words = (
+                _action_words(
+                    candidate
+                )
             )
 
             overlap = len(
@@ -472,27 +4340,23 @@ def _best_supported_nonformal_quote(
             if overlap < 2:
                 continue
 
-            if re.search(
+            # Require language consistent with a speaker's
+            # comment rather than an unrelated agenda title.
+            if not re.search(
                 r"\b("
-                r"discussion|discussed|discussing"
+                r"spoke|"
+                r"comment|"
+                r"requested|"
+                r"advocated|"
+                r"expressed|"
+                r"questioned|"
+                r"identified|"
+                r"resident"
                 r")\b",
                 normalized,
             ):
-                status = "discussed"
-
-            elif re.search(
-                r"\b("
-                r"considered|consideration|considering"
-                r")\b",
-                normalized,
-            ):
-                status = "considered"
-
-            else:
                 continue
 
-            # Prefer the strongest topic overlap, then the
-            # shorter evidence excerpt.
             score = (
                 overlap * 100
                 - len(normalized)
@@ -501,7 +4365,6 @@ def _best_supported_nonformal_quote(
             candidates.append(
                 (
                     score,
-                    status,
                     candidate.strip(),
                 )
             )
@@ -514,12 +4377,7 @@ def _best_supported_nonformal_quote(
         reverse=True,
     )
 
-    _, status, quote = candidates[0]
-
-    return {
-        "action_status": status,
-        "evidence_quote": quote,
-    }
+    return candidates[0][1]
 
 
 def _best_supported_staff_followup_quote(
@@ -753,7 +4611,15 @@ CRITICAL RULES:
             ).items
         )
 
+    # Meeting-level raw transcript detection. Initialize before processing individual ledger records.
+    raw_transcript = bool(
+        _single_line_transcript_turn_windows(
+            notes
+        )
+    )
+
     cleaned = []
+    supplemental_actions = []
 
     for record in raw_items:
         item = record.model_dump()
@@ -812,6 +4678,275 @@ CRITICAL RULES:
             source_text,
         )
 
+        if (
+            quote_valid
+            and source_name == "notes"
+            and not _action_evidence_quote_is_bounded(
+                quote,
+                source_text,
+            )
+        ):
+            quote_valid = False
+
+        # Preserve the model's original exact formal evidence
+        # before any full-topic repair/downgrade occurs.
+        #
+        # A later deterministic step may use this only to recover
+        # one narrower component-specific formal action.
+        original_status = status
+        original_source_name = source_name
+        original_quote = quote
+        original_quote_valid = quote_valid
+
+        if (
+            original_quote_valid
+            and original_status
+            in ACTION_FORMAL_STATUSES
+            and _single_line_transcript_turn_windows(
+                notes
+            )
+            and not _turn_window_formal_finality_supported(
+                topic,
+                original_status,
+                original_quote,
+                agenda_title=agenda_title,
+            )
+        ):
+            original_quote_valid = False
+
+        supplemental_component_action = None
+
+        if (
+            original_quote_valid
+            and original_status
+            in ACTION_FORMAL_STATUSES
+        ):
+            supplemental_component_action = (
+                _supplemental_component_formal_action(
+                    topic,
+                    original_status,
+                    original_quote,
+                    original_source_name,
+                    agenda_items,
+                )
+            )
+
+        # --------------------------------------------------
+        # DETERMINISTIC CONSENT-CALENDAR ACTION RECOVERY
+        # --------------------------------------------------
+        #
+        # A recording summary may describe one motion covering
+        # several Consent Calendar items rather than repeating
+        # each item's title in the vote language.
+        #
+        # Use that vote ONLY when:
+        #   1. the official agenda maps this topic to Consent;
+        #   2. the source Consent block explicitly identifies
+        #      this exact item (or a unique leaf shorthand);
+        #   3. the block contains approval + result language.
+        #
+        # This deliberately cannot validate a Public Hearing or
+        # New Business item from a generic Consent vote.
+
+        consent_action_quote = None
+
+        if (
+            agenda_item
+            and agenda_section
+            == "CONSENT CALENDAR"
+        ):
+            consent_action_quote = (
+                _best_supported_consent_action_quote(
+                    item_number,
+                    agenda_items,
+                    notes,
+                )
+            )
+
+            if (
+                consent_action_quote
+                and not _action_evidence_quote_is_bounded(
+                    consent_action_quote,
+                    notes,
+                )
+            ):
+                consent_action_quote = None
+
+        if consent_action_quote:
+            status = "approved"
+            source_name = "notes"
+            source_text = notes
+            quote = consent_action_quote
+
+            quote_valid = (
+                _quote_is_in_source(
+                    quote,
+                    source_text,
+                )
+            )
+
+        # --------------------------------------------------
+        # PUBLIC-COMMENT QUOTE REPAIR
+        # --------------------------------------------------
+        #
+        # A model may correctly identify a resident comment but
+        # paraphrase the source rather than copy it verbatim.
+        # Recover an exact topic-matched note excerpt instead of
+        # trusting the paraphrase.
+
+        if (
+            not quote_valid
+            and status
+            in {
+                "resident comment",
+                "public comment",
+                "speaker comment",
+            }
+        ):
+            if _single_line_transcript_turn_windows(
+                notes
+            ):
+                repaired_comment = (
+                    _best_supported_local_public_comment_quote(
+                        topic,
+                        notes,
+                    )
+                )
+            else:
+                repaired_comment = (
+                    _best_supported_public_comment_quote(
+                        topic,
+                        notes,
+                    )
+                )
+
+            if repaired_comment:
+                source_name = "notes"
+                source_text = notes
+                quote = repaired_comment
+
+                quote_valid = (
+                    _quote_is_in_source(
+                        quote,
+                        source_text,
+                    )
+                )
+
+        # --------------------------------------------------
+        # FORMAL ACTION SOURCE-BLOCK REPAIR
+        # --------------------------------------------------
+        #
+        # A model may return only a generic motion/vote sentence
+        # even when the immediately surrounding exact source
+        # block supplies the topic.
+        #
+        # Recover that exact topic + action block before deciding
+        # that a formal action lacks topical support.
+        #
+        # Consent Calendar collective votes remain governed by
+        # the stricter Consent-specific path above.
+
+        if (
+            status
+            in ACTION_FORMAL_STATUSES
+            and not consent_action_quote
+        ):
+            current_formal_supported = (
+                quote_valid
+                and _agenda_identity_supported_for_source(
+                    topic,
+                    agenda_title,
+                    quote,
+                    notes,
+                )
+                and _formal_action_has_topic_support(
+                    topic,
+                    item_number,
+                    quote,
+                    status,
+                )
+                and (
+                    not _single_line_transcript_turn_windows(
+                        notes
+                    )
+                    or _turn_window_formal_finality_supported(
+                        topic,
+                        status,
+                        quote,
+                        agenda_title=agenda_title,
+                    )
+                )
+            )
+
+            if not current_formal_supported:
+                repaired_formal_quote = (
+                    _best_supported_formal_action_quote(
+                        topic,
+                        status,
+                        notes,
+                            agenda_title=agenda_title,
+                    )
+                )
+
+                if repaired_formal_quote:
+                    source_name = "notes"
+                    source_text = notes
+                    quote = repaired_formal_quote
+
+                    quote_valid = (
+                        _quote_is_in_source(
+                            quote,
+                            source_text,
+                        )
+                    )
+
+                elif status != "passed":
+                    passed_motion_quote = (
+                        _best_supported_formal_action_quote(
+                            topic,
+                            "passed",
+                            notes,
+                            agenda_title=agenda_title,
+                        )
+                    )
+
+                    if passed_motion_quote:
+                        source_name = "notes"
+                        source_text = notes
+                        quote = passed_motion_quote
+
+                        quote_valid = (
+                            _quote_is_in_source(
+                                quote,
+                                source_text,
+                            )
+                        )
+
+                        status = (
+                            _canonical_formal_status_from_quote(
+                                "passed",
+                                quote,
+                            )
+                        )
+
+        # Prefer a precise action embodied in a passed motion
+        # over the generic result word "passed".
+        #
+        # This runs only after deterministic source repair so the
+        # canonical status is derived from the exact evidence
+        # excerpt that will be validated.
+        if (
+            status
+            in ACTION_FORMAL_STATUSES
+            and quote_valid
+        ):
+            status = (
+                _canonical_formal_status_from_quote(
+                    status,
+                    quote,
+                )
+            )
+
         # For a topic that has been deterministically mapped to
         # an official agenda item, the evidence quote must also
         # actually describe that topic.
@@ -822,17 +4957,28 @@ CRITICAL RULES:
         if (
             agenda_item
             and quote_valid
+            and not consent_action_quote
         ):
-            topic_overlap = len(
-                _action_words(topic)
-                & _action_words(quote)
+            topic_supported = (
+                _topic_scope_supported(
+                    topic,
+                    quote,
+                )
+                and _agenda_identity_supported_for_source(
+                    topic,
+                    agenda_title,
+                    quote,
+                    notes,
+                )
             )
 
-            if topic_overlap < 2:
+            if not topic_supported:
                 repaired = (
                     _best_supported_nonformal_quote(
                         topic,
                         notes,
+                            agenda_title=agenda_title,
+                            agenda_item_number=item_number,
                     )
                 )
 
@@ -860,6 +5006,87 @@ CRITICAL RULES:
                     # not support this agenda-mapped topic.
                     quote_valid = False
 
+        # --------------------------------------------------
+        # GENERIC NONFORMAL EXACT-QUOTE REPAIR
+        # --------------------------------------------------
+        #
+        # If a nonformal model record is unclear or its quote is
+        # invalid, recover a bounded exact discussion/update excerpt.
+        #
+        # This never creates a formal action.
+
+        # A source-verbatim quote is not automatically evidence of
+        # meeting treatment. An agenda-title-only excerpt such as:
+        #
+        #   "The title of item number two is ... project update."
+        #
+        # does not by itself prove DISCUSSED.
+        #
+        # Mark it invalid here so the existing bounded nonformal
+        # repair below can recover an actual presentation /
+        # discussion excerpt.
+        if (
+            raw_transcript
+            and status
+            in {
+                "discussed",
+                "considered",
+            }
+            and quote_valid
+            and (
+                _nonformal_status_from_quote(
+                    topic,
+                    quote,
+                    require_local_identity=True,
+                )
+                != status
+            )
+            and not (
+                status
+                == "discussed"
+                and _raw_council_commentary_supported(
+                    topic,
+                    quote,
+                )
+            )
+        ):
+            quote_valid = False
+
+        if (
+            status not in ACTION_FORMAL_STATUSES
+            and (
+                not quote_valid
+                or status == "unclear"
+            )
+        ):
+            repaired_nonformal = (
+                _best_supported_nonformal_quote(
+                    topic,
+                    notes,
+                            agenda_title=agenda_title,
+                            agenda_item_number=item_number,
+                )
+            )
+
+            if repaired_nonformal:
+                status = repaired_nonformal[
+                    "action_status"
+                ]
+
+                quote = repaired_nonformal[
+                    "evidence_quote"
+                ]
+
+                source_name = "notes"
+                source_text = notes
+
+                quote_valid = (
+                    _quote_is_in_source(
+                        quote,
+                        source_text,
+                    )
+                )
+
         # Canonical staff-follow-up evidence:
         #
         # If the model returned a generic nonformal status such
@@ -867,12 +5094,23 @@ CRITICAL RULES:
         # explicit topic-matched evidence that staff follow-up
         # was requested, preserve that more precise action.
         if status not in ACTION_FORMAL_STATUSES:
-            followup_quote = (
-                _best_supported_staff_followup_quote(
-                    topic,
-                    notes,
+            if _single_line_transcript_turn_windows(
+                notes
+            ):
+                followup_quote = (
+                    _best_supported_local_staff_followup_quote(
+                        topic,
+                        notes,
+                        agenda_title=agenda_title,
+                    )
                 )
-            )
+            else:
+                followup_quote = (
+                    _best_supported_staff_followup_quote(
+                        topic,
+                        notes,
+                    )
+                )
 
             if followup_quote:
                 status = (
@@ -890,6 +5128,102 @@ CRITICAL RULES:
                     )
                 )
 
+        raw_transcript = bool(
+            _single_line_transcript_turn_windows(
+                notes
+            )
+        )
+
+        # --------------------------------------------------
+        # RAW NON-AGENDA TOPIC CANONICALIZATION
+        # --------------------------------------------------
+        #
+        # For public-comment / other non-agenda topics, do not
+        # preserve a model-selected nonformal status merely because
+        # its quotation happens to exist somewhere in the transcript.
+        #
+        # Derive the strongest supported local treatment instead.
+        if (
+            raw_transcript
+            and not agenda_item
+            and status
+            not in ACTION_FORMAL_STATUSES
+        ):
+            local_followup = (
+                _best_supported_local_staff_followup_quote(
+                    topic,
+                    notes,
+                    agenda_title=agenda_title,
+                )
+            )
+
+            council_commentary = (
+                _best_supported_raw_council_commentary_quote(
+                    topic,
+                    notes,
+                )
+            )
+
+            explicit_nonformal = (
+                _best_supported_nonformal_quote(
+                    topic,
+                    notes,
+                    agenda_title=agenda_title,
+                    agenda_item_number=item_number,
+                )
+            )
+
+            local_comment = (
+                _best_supported_local_public_comment_quote(
+                    topic,
+                    notes,
+                )
+            )
+
+            if local_followup:
+                status = (
+                    "requested staff follow-up"
+                )
+                quote = local_followup
+                source_name = "notes"
+                source_text = notes
+
+            elif council_commentary:
+                status = "discussed"
+                quote = council_commentary
+                source_name = "notes"
+                source_text = notes
+
+            elif explicit_nonformal:
+                status = explicit_nonformal[
+                    "action_status"
+                ]
+                quote = explicit_nonformal[
+                    "evidence_quote"
+                ]
+                source_name = "notes"
+                source_text = notes
+
+            elif local_comment:
+                status = "no council action"
+                quote = local_comment
+                source_name = "notes"
+                source_text = notes
+
+            quote_valid = (
+                _quote_is_in_source(
+                    quote,
+                    source_text,
+                )
+                and (
+                    source_name != "notes"
+                    or _action_evidence_quote_is_bounded(
+                        quote,
+                        notes,
+                    )
+                )
+            )
+
         formal = (
             status
             in ACTION_FORMAL_STATUSES
@@ -900,19 +5234,120 @@ CRITICAL RULES:
         if formal:
             # An agenda listing alone never proves a final
             # formal council disposition.
-            formal_valid = (
-                source_name == "notes"
-                and quote_valid
-                and _formal_action_has_topic_support(
-                    topic,
-                    item_number,
-                    quote,
+            #
+            # A source-identified Consent Calendar approval block
+            # is different: the recording notes establish the
+            # collective vote, and the official agenda supplies
+            # the deterministic item identity/section mapping.
+            if consent_action_quote:
+                formal_valid = (
+                    source_name == "notes"
+                    and quote_valid
                 )
-            )
+
+            else:
+                formal_valid = (
+                    source_name == "notes"
+                    and quote_valid
+                    and _agenda_identity_supported_for_source(
+                        topic,
+                        agenda_title,
+                        quote,
+                        notes,
+                    )
+                    and _formal_action_has_topic_support(
+                        topic,
+                        item_number,
+                        quote,
+                        status,
+                    )
+                    and not (
+                        _conflicted_generic_collective_formal_action(
+                            item_number,
+                            agenda_section,
+                            status,
+                            quote,
+                            agenda_items,
+                        )
+                    )
+                )
+
+        nonformal_valid = True
+
+        if (
+            not formal
+            and raw_transcript
+        ):
+            if status in {
+                "discussed",
+                "considered",
+            }:
+                classified_nonformal = (
+                    _nonformal_status_from_quote(
+                        topic,
+                        quote,
+                        require_local_identity=True,
+                    )
+                )
+
+                nonformal_valid = (
+                    classified_nonformal
+                    == status
+                    or (
+                        status == "discussed"
+                        and _raw_council_commentary_supported(
+                            topic,
+                            quote,
+                        )
+                    )
+                )
+
+            elif status == "requested staff follow-up":
+                expected_followup = (
+                    _best_supported_local_staff_followup_quote(
+                        topic,
+                        notes,
+                        agenda_title=agenda_title,
+                    )
+                )
+
+                nonformal_valid = bool(
+                    expected_followup
+                    and _evidence_text_norm(
+                        expected_followup
+                    )
+                    == _evidence_text_norm(
+                        quote
+                    )
+                )
+
+            elif status in {
+                "resident comment",
+                "public comment",
+                "speaker comment",
+                "no council action",
+            }:
+                expected_comment = (
+                    _best_supported_local_public_comment_quote(
+                        topic,
+                        notes,
+                    )
+                )
+
+                nonformal_valid = bool(
+                    expected_comment
+                    and _evidence_text_norm(
+                        expected_comment
+                    )
+                    == _evidence_text_norm(
+                        quote
+                    )
+                )
 
         validated = (
             quote_valid
             and formal_valid
+            and nonformal_valid
         )
 
         validation_note = ""
@@ -929,47 +5364,119 @@ CRITICAL RULES:
                 "topic/item-linked action evidence."
             )
 
+        elif not formal and not nonformal_valid:
+            validation_note = (
+                "Nonformal status lacked sufficiently specific "
+                "topic-local treatment evidence."
+            )
+
         if formal and not validated:
             quote_norm = _action_norm(
                 quote
             )
 
-            # A stronger formal action may fail validation while
-            # the exact source quote still clearly establishes a
-            # lower-level action such as discussion.
-            #
-            # Preserve that supported action rather than losing
-            # the topic entirely.
+            fallback_status = ""
+            fallback_quote = ""
+
+            # Preserve a lower-strength action only when the
+            # exact excerpt supports the FULL topic scope.
             if (
                 quote_valid
+                and _topic_scope_supported(
+                    topic,
+                    quote,
+                )
                 and re.search(
                     r"\b("
-                    r"discussion|discussed|discussing"
+                    r"discussion|"
+                    r"discussed|"
+                    r"discussing"
                     r")\b",
                     quote_norm,
                 )
             ):
-                status = "discussed"
-                validated = True
-                validation_note = (
-                    "Formal action was not validated; "
-                    "exact source evidence supports discussion."
+                fallback_status = (
+                    "discussed"
                 )
+
+                fallback_quote = quote
 
             elif (
                 quote_valid
+                and _topic_scope_supported(
+                    topic,
+                    quote,
+                )
                 and re.search(
                     r"\b("
-                    r"considered|consideration|considering"
+                    r"considered|"
+                    r"consideration|"
+                    r"considering"
                     r")\b",
                     quote_norm,
                 )
             ):
-                status = "considered"
-                validated = True
+                fallback_status = (
+                    "considered"
+                )
+
+                fallback_quote = quote
+
+            else:
+                repaired_nonformal = (
+                    _best_supported_nonformal_quote(
+                        topic,
+                        notes,
+                            agenda_title=agenda_title,
+                            agenda_item_number=item_number,
+                    )
+                )
+
+                if repaired_nonformal:
+                    fallback_status = (
+                        repaired_nonformal[
+                            "action_status"
+                        ]
+                    )
+
+                    fallback_quote = (
+                        repaired_nonformal[
+                            "evidence_quote"
+                        ]
+                    )
+
+            if (
+                fallback_status
+                and fallback_quote
+            ):
+                status = (
+                    fallback_status
+                )
+
+                quote = (
+                    fallback_quote
+                )
+
+                source_name = "notes"
+                source_text = notes
+
+                quote_valid = (
+                    _quote_is_in_source(
+                        quote,
+                        source_text,
+                    )
+                )
+
+                validated = (
+                    quote_valid
+                )
+
                 validation_note = (
-                    "Formal action was not validated; "
-                    "exact source evidence supports consideration."
+                    "Formal action was not validated for the "
+                    "full topic scope; exact source evidence "
+                    "supports "
+                    + status
+                    + "."
                 )
 
             else:
@@ -991,11 +5498,50 @@ CRITICAL RULES:
             )
         )
 
+        # Determine whether explicit source item numbers
+        # contradict the official agenda mapping.
+        #
+        # Some systems use a hierarchical official number such
+        # as 5.6 while recording-derived notes use the unique
+        # Consent Calendar leaf shorthand "Item 6".
+        #
+        # That shorthand is NOT a conflict when the official
+        # agenda deterministically establishes that 6 uniquely
+        # means Consent Calendar item 5.6.
+        #
+        # This exception applies only to official Consent
+        # Calendar items. A Public Hearing item 21 paired with
+        # source evidence for items 17/18 remains a conflict.
+
+        evidence_matches_item = bool(
+            item_number
+            and item_number
+            in evidence_item_numbers
+        )
+
+        if (
+            not evidence_matches_item
+            and item_number
+            and agenda_section
+            == "CONSENT CALENDAR"
+            and evidence_item_numbers
+        ):
+            consent_labels = (
+                _consent_item_source_labels(
+                    item_number,
+                    agenda_items,
+                )
+            )
+
+            evidence_matches_item = bool(
+                consent_labels
+                & evidence_item_numbers
+            )
+
         agenda_linkage_conflict = bool(
             item_number
             and evidence_item_numbers
-            and item_number
-            not in evidence_item_numbers
+            and not evidence_matches_item
         )
 
         if agenda_linkage_conflict:
@@ -1005,7 +5551,7 @@ CRITICAL RULES:
                 + ", ".join(
                     sorted(
                         evidence_item_numbers,
-                        key=int,
+                        key=_agenda_item_sort_key,
                     )
                 )
                 + " while the official agenda maps this topic "
@@ -1035,7 +5581,7 @@ CRITICAL RULES:
                 "evidence_item_numbers":
                     sorted(
                         evidence_item_numbers,
-                        key=int,
+                        key=_agenda_item_sort_key,
                     ),
                 "agenda_title":
                     agenda_title,
@@ -1048,6 +5594,82 @@ CRITICAL RULES:
                     validation_note,
             }
         )
+
+        # Add the narrower formal action only when the final
+        # parent record did NOT itself retain a validated formal
+        # action for the full topic.
+        if (
+            supplemental_component_action
+            and not (
+                validated
+                and status
+                in ACTION_FORMAL_STATUSES
+            )
+        ):
+            supplemental_actions.append(
+                supplemental_component_action
+            )
+
+    # ------------------------------------------------------
+    # DEDUPLICATE + APPEND SUPPLEMENTAL COMPONENT ACTIONS
+    # ------------------------------------------------------
+
+    for supplemental in supplemental_actions:
+        duplicate = False
+
+        for existing in cleaned:
+            same_topic = (
+                _action_norm(
+                    existing.get(
+                        "topic"
+                    )
+                )
+                == _action_norm(
+                    supplemental.get(
+                        "topic"
+                    )
+                )
+            )
+
+            same_item_action = (
+                supplemental.get(
+                    "item_number"
+                )
+                and existing.get(
+                    "item_number"
+                )
+                == supplemental.get(
+                    "item_number"
+                )
+                and _action_norm(
+                    existing.get(
+                        "action_status"
+                    )
+                )
+                == _action_norm(
+                    supplemental.get(
+                        "action_status"
+                    )
+                )
+            )
+
+            if (
+                existing.get(
+                    "validated"
+                )
+                is True
+                and (
+                    same_topic
+                    or same_item_action
+                )
+            ):
+                duplicate = True
+                break
+
+        if not duplicate:
+            cleaned.append(
+                supplemental
+            )
 
     return cleaned
 
@@ -1563,6 +6185,357 @@ def _person_correction_plausible(observed, canonical):
     return similarity >= 0.68
 
 
+def _role_labeled_person_key(
+    value,
+):
+    """
+    Normalize a role-labeled elected-official reference for
+    candidate de-duplication.
+
+    Preserve given-name distinctions so two officials who share
+    a surname do not collapse into one candidate.
+
+    Examples:
+      Council Member John Smith -> john smith
+      Council Member Jane Smith -> jane smith
+      Council Member Smith      -> smith
+    """
+    normalized = str(
+        value or ""
+    ).casefold()
+
+    normalized = re.sub(
+        r"[’']",
+        "",
+        normalized,
+    )
+
+    normalized = re.sub(
+        r"[^a-z0-9\s-]",
+        " ",
+        normalized,
+    )
+
+    normalized = re.sub(
+        r"\s+",
+        " ",
+        normalized,
+    ).strip()
+
+    role_prefix = re.compile(
+        r"^(?:"
+        r"council\s+member|"
+        r"councilmember|"
+        r"mayor\s+pro\s+tem|"
+        r"vice\s+mayor|"
+        r"mayor"
+        r")\s+",
+        re.I,
+    )
+
+    normalized = role_prefix.sub(
+        "",
+        normalized,
+    ).strip()
+
+    return normalized
+
+
+
+
+
+def _role_labeled_person_candidates(
+    notes,
+):
+    """
+    Extract transcript forms that explicitly follow an elected-
+    official role label.
+
+    These are safer identity candidates than arbitrary names
+    because the transcript itself establishes the person's role.
+
+    This helper does NOT resolve identity. It only makes sure a
+    role-labeled observed form cannot silently disappear from the
+    verification pass.
+    """
+    pattern = re.compile(
+        r"\b"
+        r"(?:(?i:"
+        r"council\s+member|"
+        r"councilmember|"
+        r"mayor\s+pro\s+tem|"
+        r"vice\s+mayor|"
+        # Do not let bare "Mayor" consume malformed ASR forms
+        # such as "Mayor Pro Tim" as though "Pro Tim" were a name.
+        r"mayor(?!\s+pro\b)"
+        r"))"
+        r"\s+"
+        r"("
+        # Deliberately exclude periods from name tokens.
+        # This prevents:
+        #
+        #   Council Member Otto. That's...
+        #
+        # from becoming the fake person "Otto. That's".
+        r"[A-Z][A-Za-z'’-]*"
+        r"(?:\s+[A-Z][A-Za-z'’-]*)?"
+        r")"
+    )
+
+    generic_surnames = {
+        "action",
+        "actions",
+        "and",
+        "comment",
+        "comments",
+        "meeting",
+        "member",
+        "members",
+        "report",
+        "reports",
+    }
+
+    found = []
+    seen = set()
+
+    for match in pattern.finditer(
+        str(
+            notes or ""
+        )
+    ):
+        full = re.sub(
+            r"\s+",
+            " ",
+            match.group(0).strip(),
+        )
+
+        surname = _person_surname_token(
+            full
+        )
+
+        if (
+            not surname
+            or surname
+            in generic_surnames
+        ):
+            continue
+
+        key = _role_labeled_person_key(
+            full
+        )
+
+        if not key:
+            continue
+
+        if key in seen:
+            continue
+
+        seen.add(
+            key
+        )
+
+        found.append(
+            full
+        )
+
+    return found
+
+
+
+def _person_soundex(
+    value,
+):
+    """
+    Conservative phonetic key for surname-like tokens.
+
+    Used only as one requirement in the role-labeled elected-
+    official correction path. Never sufficient by itself.
+    """
+    token = _person_surname_token(
+        value
+    )
+
+    token = re.sub(
+        r"[^a-z]",
+        "",
+        token.casefold(),
+    )
+
+    if not token:
+        return ""
+
+    codes = {
+        **{
+            letter: "1"
+            for letter in "bfpv"
+        },
+        **{
+            letter: "2"
+            for letter in "cgjkqsxz"
+        },
+        **{
+            letter: "3"
+            for letter in "dt"
+        },
+        "l": "4",
+        **{
+            letter: "5"
+            for letter in "mn"
+        },
+        "r": "6",
+    }
+
+    result = [
+        token[0].upper()
+    ]
+
+    previous = codes.get(
+        token[0],
+        "",
+    )
+
+    for char in token[1:]:
+        if char in "aeiouy":
+            previous = ""
+            continue
+
+        if char in "hw":
+            continue
+
+        code = codes.get(
+            char,
+            "",
+        )
+
+        if not code:
+            previous = ""
+            continue
+
+        if code != previous:
+            result.append(
+                code
+            )
+
+        previous = code
+
+    return (
+        "".join(
+            result
+        )
+        + "000"
+    )[:4]
+
+
+
+def _role_labeled_person_correction_plausible(
+    observed,
+    canonical,
+    role_candidates,
+):
+    """
+    Narrow fallback for elected officials explicitly identified
+    by role in the transcript.
+
+    This intentionally does NOT lower the normal person matching
+    threshold.
+
+    Requirements:
+      - observed surname belongs to a role-labeled transcript form
+      - same first letter
+      - same surname length
+      - at least four characters
+      - no more than two character substitutions
+      - identical Soundex key
+
+    Exact canonical official-source support is still required later
+    by verify_entities before CORRECTED can be accepted.
+    """
+    observed_name = _person_surname_token(
+        observed
+    )
+
+    canonical_name = _person_surname_token(
+        canonical
+    )
+
+    if (
+        not observed_name
+        or not canonical_name
+    ):
+        return False
+
+    role_surnames = {
+        _person_surname_token(
+            candidate
+        )
+        for candidate in (
+            role_candidates or []
+        )
+    }
+
+    role_surnames.discard(
+        ""
+    )
+
+    if observed_name not in role_surnames:
+        return False
+
+    if min(
+        len(
+            observed_name
+        ),
+        len(
+            canonical_name
+        ),
+    ) < 4:
+        return False
+
+    if (
+        len(
+            observed_name
+        )
+        != len(
+            canonical_name
+        )
+    ):
+        return False
+
+    if (
+        observed_name[0]
+        != canonical_name[0]
+    ):
+        return False
+
+    differing_positions = sum(
+        left != right
+        for left, right
+        in zip(
+            observed_name,
+            canonical_name,
+        )
+    )
+
+    if differing_positions > 2:
+        return False
+
+    observed_soundex = _person_soundex(
+        observed_name
+    )
+
+    canonical_soundex = _person_soundex(
+        canonical_name
+    )
+
+    return bool(
+        observed_soundex
+        and observed_soundex
+        == canonical_soundex
+    )
+
+
+
+
+
 def verify_entities(
     meeting,
     notes,
@@ -1591,6 +6564,12 @@ def verify_entities(
 
     preverified_entities = (
         preverified_entities or []
+    )
+
+    mandatory_role_people = (
+        _role_labeled_person_candidates(
+            notes
+        )
     )
 
     registry_context = json.dumps(
@@ -1636,8 +6615,23 @@ Do not use outside knowledge or infer identities from similarity.
 The recording-derived notes may contain phonetic spellings,
 automatic-transcription errors or incomplete names.
 
-Identify approximately 10-20 significant proper nouns that
-could reasonably appear in a news article:
+MANDATORY ROLE-LABELED PERSON COVERAGE:
+
+The following forms were deterministically extracted because the
+recording explicitly labels them as elected officials:
+
+{json.dumps(mandatory_role_people, ensure_ascii=False, indent=2)}
+
+Return one PERSON entity row for EVERY distinct person in this
+list, even if the safest result is UNVERIFIED.
+
+For these role-labeled forms, compare the observed surname against
+the official meeting roll call and official city roster/directory.
+Do not omit a role-labeled official merely because the spelling is
+phonetic or uncertain.
+
+Identify approximately 10-20 additional significant proper nouns
+that could reasonably appear in a news article:
 
 - elected officials
 - city staff
@@ -1863,9 +6857,16 @@ Return ONLY JSON:
         if (
             entity_type == "person"
             and canonical.casefold() != observed.casefold()
-            and not _person_correction_plausible(
-                observed,
-                canonical,
+            and not (
+                _person_correction_plausible(
+                    observed,
+                    canonical,
+                )
+                or _role_labeled_person_correction_plausible(
+                    observed,
+                    canonical,
+                    mandatory_role_people,
+                )
             )
         ):
             proposed = canonical
@@ -2024,6 +7025,78 @@ Return ONLY JSON:
                 "evidence": evidence,
                 "official_source_url": source,
             }
+        )
+
+    # A role-labeled elected official must never silently
+    # disappear because the model chose different proper nouns.
+    #
+    # Missing mandatory candidates are retained as UNVERIFIED,
+    # which keeps the publication whitelist fail-closed.
+    represented_role_people = {
+        _role_labeled_person_key(
+            entity.get(
+                "observed_text",
+                ""
+            )
+        )
+        for entity in cleaned
+        if entity.get(
+            "entity_type"
+        )
+        == "person"
+    }
+
+    represented_role_people.discard(
+        ""
+    )
+
+    for candidate in mandatory_role_people:
+        candidate_key = (
+            _role_labeled_person_key(
+                candidate
+            )
+        )
+
+        if (
+            not candidate_key
+            or candidate_key
+            in represented_role_people
+        ):
+            continue
+
+        cleaned.append(
+            {
+                "observed_text":
+                    candidate,
+
+                "canonical_text":
+                    candidate,
+
+                "entity_type":
+                    "person",
+
+                "status":
+                    "UNVERIFIED",
+
+                "confidence":
+                    "low",
+
+                "evidence":
+                    (
+                        "The recording explicitly identified this "
+                        "speaker by elected-official role, but the "
+                        "secondary verifier omitted the candidate. "
+                        "CouncilWatch retained it as UNVERIFIED "
+                        "rather than silently dropping it."
+                    ),
+
+                "official_source_url":
+                    "",
+            }
+        )
+
+        represented_role_people.add(
+            candidate_key
         )
 
     return cleaned

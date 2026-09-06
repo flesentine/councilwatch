@@ -16,6 +16,7 @@ from gemini_worker import (
 from source_acquisition import acquire_source
 from meetings import latest_ready_meetings
 from meeting_intelligence import (
+    ACTION_FORMAL_STATUSES,
     build_meeting_intelligence,
     writer_context,
     audit_verification_context,
@@ -103,12 +104,12 @@ def strip_public_agenda_item_numbers(story):
         \s*
         agenda\s+items?
         \s+
-        \d+
+        \d+(?:\.\d+)*
         (?:
             \s*
             (?:,|and|&|/|-)
             \s*
-            \d+
+            \d+(?:\.\d+)*
         )*
         \s*
         \)
@@ -120,12 +121,12 @@ def strip_public_agenda_item_numbers(story):
         r"""
         \bagenda\s+items?
         \s+
-        \d+
+        \d+(?:\.\d+)*
         (?:
             \s*
             (?:,|and|&|/|-)
             \s*
-            \d+
+            \d+(?:\.\d+)*
         )*
         \b
         """,
@@ -139,12 +140,12 @@ def strip_public_agenda_item_numbers(story):
         \s*
         items?
         \s+
-        \d+
+        \d+(?:\.\d+)*
         (?:
             \s*
             (?:,|and|&|/|-)
             \s*
-            \d+
+            \d+(?:\.\d+)*
         )*
         \s*
         \)
@@ -156,12 +157,12 @@ def strip_public_agenda_item_numbers(story):
         r"""
         \bitems?
         \s+
-        \d+
+        \d+(?:\.\d+)*
         (?:
             \s*
             (?:,|and|&|/|-)
             \s*
-            \d+
+            \d+(?:\.\d+)*
         )*
         \b
         """,
@@ -444,6 +445,1185 @@ def enforce_public_action_constraints(
     return changed
 
 
+def normalize_validated_formal_status_language(
+    story,
+    intelligence,
+):
+    """
+    Keep reader-facing formal council-action verbs aligned with
+    the source-validated action ledger.
+
+    Example:
+
+      ledger: APPROVED geotechnical contracts
+
+    Public copy must not silently strengthen or mutate that into:
+
+      authorized geotechnical services
+      awarded geotechnical agreements
+
+    A rewrite occurs only when an attributable sentence or clause
+    has at least two meaningful topical cues for validated formal
+    action records and all matching records agree on the permitted
+    status.
+
+    If different independently validated formal actions occur in
+    separate comma/semicolon clauses, normalize each attributable
+    clause independently.
+
+    If different validated formal actions remain mixed inside the
+    same clause, leave that clause alone rather than guessing which
+    verb belongs to which action.
+    """
+
+    actions = [
+        action
+        for action in intelligence.get(
+            "action_ledger",
+            [],
+        )
+        if (
+            action.get(
+                "validated"
+            )
+            is True
+            and str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            in ACTION_FORMAL_STATUSES
+        )
+    ]
+
+    if not actions:
+        return False
+
+    # --------------------------------------------------------
+    # Formal verb forms.
+    #
+    # The keys are the canonical ledger statuses.
+    # --------------------------------------------------------
+
+    forms = {
+        "approved": {
+            "approve",
+            "approves",
+            "approved",
+            "approving",
+        },
+        "adopted": {
+            "adopt",
+            "adopts",
+            "adopted",
+            "adopting",
+        },
+        "authorized": {
+            "authorize",
+            "authorizes",
+            "authorized",
+            "authorizing",
+        },
+        "awarded": {
+            "award",
+            "awards",
+            "awarded",
+            "awarding",
+        },
+        "directed": {
+            "direct",
+            "directs",
+            "directed",
+            "directing",
+        },
+        "rejected": {
+            "reject",
+            "rejects",
+            "rejected",
+            "rejecting",
+        },
+        "denied": {
+            "deny",
+            "denies",
+            "denied",
+            "denying",
+        },
+        "appointed": {
+            "appoint",
+            "appoints",
+            "appointed",
+            "appointing",
+        },
+        "accepted": {
+            "accept",
+            "accepts",
+            "accepted",
+            "accepting",
+        },
+        "passed": {
+            "pass",
+            "passes",
+            "passed",
+            "passing",
+        },
+    }
+
+    word_to_status = {
+        word: status
+        for status, words in forms.items()
+        for word in words
+    }
+
+    # Replacement surface form should preserve the broad tense
+    # of the writer's original verb.
+
+    present = {
+        "approved": "approves",
+        "adopted": "adopts",
+        "authorized": "authorizes",
+        "awarded": "awards",
+        "directed": "directs",
+        "rejected": "rejects",
+        "denied": "denies",
+        "appointed": "appoints",
+        "accepted": "accepts",
+        "passed": "passes",
+    }
+
+    infinitive = {
+        "approved": "approve",
+        "adopted": "adopt",
+        "authorized": "authorize",
+        "awarded": "award",
+        "directed": "direct",
+        "rejected": "reject",
+        "denied": "deny",
+        "appointed": "appoint",
+        "accepted": "accept",
+        "passed": "pass",
+    }
+
+    progressive = {
+        "approved": "approving",
+        "adopted": "adopting",
+        "authorized": "authorizing",
+        "awarded": "awarding",
+        "directed": "directing",
+        "rejected": "rejecting",
+        "denied": "denying",
+        "appointed": "appointing",
+        "accepted": "accepting",
+        "passed": "passing",
+    }
+
+    past = {
+        status: status
+        for status in ACTION_FORMAL_STATUSES
+    }
+
+    all_action_words = set(
+        word_to_status
+    )
+
+    stopwords = {
+        "agenda",
+        "annual",
+        "city",
+        "council",
+        "councilmember",
+        "item",
+        "items",
+        "meeting",
+        "motion",
+        "public",
+        "staff",
+        "vote",
+        "voted",
+
+        # Formal verbs themselves are action strength, not topic
+        # evidence.
+        *all_action_words,
+    }
+
+    def tokens(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(
+                    value or ""
+                ).lower(),
+            )
+            if (
+                len(word) >= 4
+                and word not in stopwords
+            )
+        }
+
+    indexed = []
+
+    for action in actions:
+        cues = tokens(
+            str(
+                action.get(
+                    "topic",
+                    "",
+                )
+            )
+            + " "
+            + str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+            )
+        )
+
+        if len(cues) < 2:
+            continue
+
+        indexed.append(
+            (
+                action,
+                cues,
+            )
+        )
+
+    if not indexed:
+        return False
+
+    # Count how many validated formal actions use each topical
+    # cue. A word shared by several actions is useful context but
+    # cannot, by itself, identify which action owns a sentence.
+    #
+    # This is especially important for boilerplate official-title
+    # words such as a municipality name. For example, two Lake
+    # Forest agenda titles may both contain "Lake Forest"; those
+    # two words must not cause an unrelated action to claim copy
+    # merely because the city name appears in the sentence.
+    cue_frequency = {}
+
+    for _, cues in indexed:
+        for cue in cues:
+            cue_frequency[cue] = (
+                cue_frequency.get(
+                    cue,
+                    0,
+                )
+                + 1
+            )
+
+    verb_pattern = re.compile(
+        r"\b("
+        + "|".join(
+            sorted(
+                (
+                    re.escape(word)
+                    for word
+                    in all_action_words
+                ),
+                key=len,
+                reverse=True,
+            )
+        )
+        + r")\b",
+        re.I,
+    )
+
+    def replacement_word(
+        original,
+        canonical_status,
+    ):
+        low = original.lower()
+
+        if low.endswith(
+            "ing"
+        ):
+            replacement = progressive[
+                canonical_status
+            ]
+
+        elif low in {
+            "approves",
+            "adopts",
+            "authorizes",
+            "awards",
+            "directs",
+            "rejects",
+            "denies",
+            "appoints",
+            "accepts",
+            "passes",
+        }:
+            replacement = present[
+                canonical_status
+            ]
+
+        elif low in {
+            "approve",
+            "adopt",
+            "authorize",
+            "award",
+            "direct",
+            "reject",
+            "deny",
+            "appoint",
+            "accept",
+            "pass",
+        }:
+            replacement = infinitive[
+                canonical_status
+            ]
+
+        else:
+            replacement = past[
+                canonical_status
+            ]
+
+        if (
+            original
+            and original[0].isupper()
+        ):
+            replacement = (
+                replacement[0].upper()
+                + replacement[1:]
+            )
+
+        return replacement
+
+    def matching_actions(
+        value,
+    ):
+        """
+        Return validated formal actions with at least two topical
+        cues in this exact piece of copy.
+        """
+
+        value_tokens = tokens(
+            value
+        )
+
+        matched = []
+
+        for action, cues in indexed:
+            overlap_cues = (
+                value_tokens
+                & cues
+            )
+
+            overlap = len(
+                overlap_cues
+            )
+
+            if overlap < 2:
+                continue
+
+            # When several validated formal actions exist, at
+            # least one matching topical cue must discriminate
+            # this action from the others.
+            #
+            # Shared context such as a city name, "agreement",
+            # or another word appearing in multiple action
+            # identities may contribute to the >=2 overlap but
+            # cannot be the sole basis for attribution.
+            if (
+                len(indexed) > 1
+                and not any(
+                    cue_frequency.get(
+                        cue,
+                        0,
+                    )
+                    == 1
+                    for cue in overlap_cues
+                )
+            ):
+                continue
+
+            matched.append(
+                (
+                    action,
+                    overlap,
+                )
+            )
+
+        return matched
+
+
+    def normalize_segment(
+        value,
+    ):
+        """
+        Normalize one independently attributable clause.
+
+        If multiple validated formal statuses still match this
+        exact clause, fail closed and leave it unchanged.
+        """
+
+        value = str(
+            value or ""
+        )
+
+        matched = matching_actions(
+            value
+        )
+
+        if not matched:
+            return value
+
+        statuses = {
+            str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            for action, _ in matched
+        }
+
+        # Multiple validated action types remain inside this
+        # exact clause. Do not guess which verb belongs to which
+        # action.
+        if len(
+            statuses
+        ) != 1:
+            return value
+
+        canonical_status = next(
+            iter(
+                statuses
+            )
+        )
+
+        def adopted_instrument_supports_embedded_status(
+            observed_status,
+        ):
+            """
+            An adopted ordinance/resolution can itself carry a
+            separately named formal effect.
+
+            Example:
+
+              ADOPTION OF RESOLUTION ... PROVIDING FOR THE
+              APPOINTMENT ...
+
+            If that validated instrument was adopted, reader copy
+            may correctly say both:
+
+              Council adopted the resolution.
+              Council appointed the named officeholders.
+
+            Do not rewrite the embedded APPOINTED effect into the
+            syntactically wrong "adopted the candidates."
+
+            This exception is intentionally narrow:
+              - the canonical ledger status must be ADOPTED
+              - the observed embedded status must be APPOINTED
+              - the same matched action's official agenda identity
+                must explicitly contain appointment language
+
+            Rejected, denied, proposed or unrelated appointment
+            items receive no exception.
+            """
+            if (
+                canonical_status
+                != "adopted"
+            ):
+                return False
+
+            if (
+                observed_status
+                != "appointed"
+            ):
+                return False
+
+            for action, _ in matched:
+                action_status = str(
+                    action.get(
+                        "action_status",
+                        "",
+                    )
+                ).strip().lower()
+
+                if (
+                    action_status
+                    != "adopted"
+                ):
+                    continue
+
+                identity = (
+                    str(
+                        action.get(
+                            "agenda_title",
+                            "",
+                        )
+                    )
+                    + " "
+                    + str(
+                        action.get(
+                            "topic",
+                            "",
+                        )
+                    )
+                )
+
+                if re.search(
+                    r"\bappoint(?:ed|ing|ment|ments)?\b",
+                    identity,
+                    re.I,
+                ):
+                    return True
+
+            return False
+
+
+        def replace(
+            match
+        ):
+            original = match.group(
+                0
+            )
+
+            observed_status = (
+                word_to_status.get(
+                    original.lower()
+                )
+            )
+
+            if (
+                not observed_status
+                or observed_status
+                == canonical_status
+            ):
+                return original
+
+            if adopted_instrument_supports_embedded_status(
+                observed_status
+            ):
+                return original
+
+            return replacement_word(
+                original,
+                canonical_status,
+            )
+
+        cleaned = verb_pattern.sub(
+            replace,
+            value,
+        )
+
+        # ----------------------------------------------------
+        # Grammar cleanup for common contract language.
+        # ----------------------------------------------------
+
+        if canonical_status == "approved":
+            cleaned = re.sub(
+                r"\b("
+                r"approve|approves|approved|approving"
+                r")"
+                r"(\s+(?:(?:an?|the)\s+)?"
+                r"(?:agreements?|contracts?))"
+                r"\s+to\b",
+                r"\1\2 with",
+                cleaned,
+                flags=re.I,
+            )
+
+        if canonical_status == "awarded":
+            cleaned = re.sub(
+                r"\b("
+                r"award|awards|awarded|awarding"
+                r")"
+                r"(\s+(?:(?:an?|the)\s+)?"
+                r"(?:agreements?|contracts?))"
+                r"\s+with\b",
+                r"\1\2 to",
+                cleaned,
+                flags=re.I,
+            )
+
+        return cleaned
+
+
+    # --------------------------------------------------------
+    # SAFE CLAUSE BOUNDARIES
+    #
+    # Split only before another explicit FORMAL action verb
+    # following a comma or semicolon.
+    #
+    # This handles:
+    #
+    #   approved staff ... digital signage,
+    #   approved a conditional use permit ...
+    #
+    # without splitting ordinary commas in company names,
+    # monetary values, addresses, or descriptive lists.
+    # --------------------------------------------------------
+
+    clause_action_words = (
+        "|".join(
+            sorted(
+                (
+                    re.escape(
+                        word
+                    )
+                    for word
+                    in all_action_words
+                ),
+                key=len,
+                reverse=True,
+            )
+        )
+    )
+
+
+    clause_split_pattern = re.compile(
+        r"("
+        r"(?:,\s+|;\s+)"
+        r"(?="
+        r"(?:and\s+|but\s+)?"
+        r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
+        r"(?:"
+        + clause_action_words
+        + r")\b"
+        r")"
+        r"(?:and\s+|but\s+)?"
+        r")",
+        re.I,
+    )
+
+
+    def normalize_sentence(
+        value,
+    ):
+        value = str(
+            value or ""
+        )
+
+        matched = matching_actions(
+            value
+        )
+
+        if not matched:
+            return value
+
+        statuses = {
+            str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            for action, _ in matched
+        }
+
+        # Fast path: one validated formal status owns the entire
+        # sentence.
+        if len(
+            statuses
+        ) == 1:
+            return normalize_segment(
+                value
+            )
+
+        # More than one validated formal status appears in the
+        # sentence. Try only conservative clause boundaries.
+        parts = clause_split_pattern.split(
+            value
+        )
+
+        if len(
+            parts
+        ) == 1:
+            # Still genuinely ambiguous.
+            return value
+
+        for i in range(
+            0,
+            len(
+                parts
+            ),
+            2,
+        ):
+            parts[i] = (
+                normalize_segment(
+                    parts[i]
+                )
+            )
+
+        return "".join(
+            parts
+        )
+
+
+    def normalize_value(value):
+        value = str(
+            value or ""
+        )
+
+        # Work sentence by sentence so one action in a paragraph
+        # cannot rewrite an unrelated formal verb elsewhere.
+        parts = re.split(
+            r"(?<=[.!?])(\s+)",
+            value,
+        )
+
+        for i in range(
+            0,
+            len(parts),
+            2,
+        ):
+            parts[i] = (
+                normalize_sentence(
+                    parts[i]
+                )
+            )
+
+        return "".join(
+            parts
+        )
+
+    changed = False
+
+    new_headline = normalize_value(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = normalize_value(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        normalize_value(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        normalize_value(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
+
+def _remove_validated_unclear_formal_claims(
+    story,
+    intelligence,
+):
+    """
+    Fail closed when a validated ledger record says its formal
+    disposition is UNCLEAR but reader-facing copy nevertheless
+    claims a formal Council action.
+
+    There is no evidence-safe replacement verb for UNCLEAR.
+
+    Remove only the prose sentence/fact containing the unsupported
+    formal claim. Preserve unrelated supported sentences.
+
+    Sentence splitting protects common abbreviations such as:
+
+      Sonitrol, Inc.
+      Resolution No. 2026-1539
+      Mr. Smith
+      Dr. Smith
+      U.S.
+
+    so an abbreviation cannot leave an orphan clause behind.
+    """
+    unclear_actions = [
+        action
+        for action in intelligence.get(
+            "action_ledger",
+            [],
+        )
+        if (
+            action.get(
+                "validated"
+            )
+            is True
+            and str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            == "unclear"
+        )
+    ]
+
+    if not unclear_actions:
+        return False
+
+    formal_words = {
+        "approve",
+        "approves",
+        "approved",
+        "approving",
+
+        "adopt",
+        "adopts",
+        "adopted",
+        "adopting",
+
+        "authorize",
+        "authorizes",
+        "authorized",
+        "authorizing",
+
+        "award",
+        "awards",
+        "awarded",
+        "awarding",
+
+        "direct",
+        "directs",
+        "directed",
+        "directing",
+
+        "reject",
+        "rejects",
+        "rejected",
+        "rejecting",
+
+        "deny",
+        "denies",
+        "denied",
+        "denying",
+
+        "appoint",
+        "appoints",
+        "appointed",
+        "appointing",
+
+        "accept",
+        "accepts",
+        "accepted",
+        "accepting",
+
+        "pass",
+        "passes",
+        "passed",
+        "passing",
+    }
+
+    formal_pattern = re.compile(
+        r"\b(?:"
+        + "|".join(
+            sorted(
+                (
+                    re.escape(
+                        word
+                    )
+                    for word in formal_words
+                ),
+                key=len,
+                reverse=True,
+            )
+        )
+        + r")\b",
+        re.I,
+    )
+
+    stopwords = {
+        "agenda",
+        "annual",
+        "calendar",
+        "city",
+        "consent",
+        "council",
+        "councilmember",
+        "item",
+        "items",
+        "meeting",
+        "motion",
+        "municipal",
+        "public",
+        "staff",
+        "vote",
+        "voted",
+        *formal_words,
+    }
+
+    def tokens(
+        value,
+    ):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(
+                    value or ""
+                ).lower(),
+            )
+            if (
+                len(
+                    word
+                ) >= 4
+                and word
+                not in stopwords
+            )
+        }
+
+    unclear_cue_sets = []
+
+    for action in unclear_actions:
+        cues = tokens(
+            str(
+                action.get(
+                    "topic",
+                    "",
+                )
+            )
+            + " "
+            + str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+            )
+        )
+
+        if len(
+            cues
+        ) >= 2:
+            unclear_cue_sets.append(
+                cues
+            )
+
+    if not unclear_cue_sets:
+        return False
+
+    def unsupported_formal_claim(
+        value,
+    ):
+        value = str(
+            value or ""
+        )
+
+        if not formal_pattern.search(
+            value
+        ):
+            return False
+
+        value_tokens = tokens(
+            value
+        )
+
+        return any(
+            len(
+                value_tokens
+                & cues
+            )
+            >= 2
+            for cues in unclear_cue_sets
+        )
+
+    abbreviation_pattern = re.compile(
+        r"\b(?:"
+        r"Inc|Corp|Co|Ltd|"
+        r"No|"
+        r"Mr|Mrs|Ms|Dr|"
+        r"Jr|Sr"
+        r")\.",
+        re.I,
+    )
+
+    initialism_pattern = re.compile(
+        r"\b(?:[A-Za-z]\.){2,}"
+    )
+
+    placeholder = (
+        "\uE000"
+    )
+
+    def protect_abbreviation_periods(
+        value,
+    ):
+        value = abbreviation_pattern.sub(
+            lambda match:
+                match.group(
+                    0
+                )[
+                    :-1
+                ]
+                + placeholder,
+            value,
+        )
+
+        value = initialism_pattern.sub(
+            lambda match:
+                match.group(
+                    0
+                ).replace(
+                    ".",
+                    placeholder,
+                ),
+            value,
+        )
+
+        return value
+
+    def restore_abbreviation_periods(
+        value,
+    ):
+        return value.replace(
+            placeholder,
+            ".",
+        )
+
+    def sentence_parts(
+        value,
+    ):
+        protected = (
+            protect_abbreviation_periods(
+                str(
+                    value or ""
+                )
+            )
+        )
+
+        parts = re.split(
+            r"(?<=[.!?])(\s+)",
+            protected,
+        )
+
+        return [
+            restore_abbreviation_periods(
+                part
+            )
+            for part in parts
+        ]
+
+    def scrub(
+        value,
+    ):
+        value = str(
+            value or ""
+        )
+
+        if not value:
+            return value
+
+        parts = sentence_parts(
+            value
+        )
+
+        for index in range(
+            0,
+            len(
+                parts
+            ),
+            2,
+        ):
+            sentence = parts[
+                index
+            ]
+
+            if unsupported_formal_claim(
+                sentence
+            ):
+                parts[
+                    index
+                ] = ""
+
+                if (
+                    index + 1
+                    < len(
+                        parts
+                    )
+                ):
+                    parts[
+                        index + 1
+                    ] = ""
+
+        cleaned = "".join(
+            parts
+        )
+
+        cleaned = re.sub(
+            r"[ \t]{2,}",
+            " ",
+            cleaned,
+        ).strip()
+
+        return cleaned
+
+    changed = False
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = []
+
+    for paragraph in story.body:
+        cleaned = scrub(
+            paragraph
+        )
+
+        if cleaned:
+            new_body.append(
+                cleaned
+            )
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = []
+
+    for fact in story.key_facts:
+        cleaned = scrub(
+            fact
+        )
+
+        if cleaned:
+            new_key_facts.append(
+                cleaned
+            )
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -455,6 +1635,20 @@ def normalize_validated_action_language(
 
     The action ledger controls the permitted action strength.
     """
+
+    changed = (
+        normalize_validated_formal_status_language(
+            story,
+            intelligence,
+        )
+    )
+
+    if _remove_validated_unclear_formal_claims(
+        story,
+        intelligence,
+    ):
+        changed = True
+
 
     actions = intelligence.get(
         "action_ledger",
@@ -477,7 +1671,7 @@ def normalize_validated_action_language(
     ]
 
     if not requested_actions:
-        return False
+        return changed
 
     stronger_actions = [
         action
@@ -767,8 +1961,6 @@ def normalize_validated_action_language(
             )
 
         return cleaned
-
-    changed = False
 
     new_headline = normalize(
         story.headline
