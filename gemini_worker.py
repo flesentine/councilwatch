@@ -171,6 +171,898 @@ WRITTEN AGENDA / OFFICIAL PAGE TEXT:
     return StoryDraft.model_validate_json(response.text)
 
 
+
+def _normalize_audit_guard_text(
+    value,
+):
+    import re as _re
+
+    value = str(
+        value or ""
+    )
+
+    value = value.replace(
+        chr(8217),
+        "'",
+    )
+
+    value = value.replace(
+        "*",
+        "",
+    ).replace(
+        "`",
+        "",
+    )
+
+    value = _re.sub(
+        r"\s+",
+        " ",
+        value,
+    )
+
+    return value.strip().lower()
+
+
+def _audit_issue_correction_is_noop(
+    issue,
+):
+    """
+    Reject an audit issue whose proposed correction does not
+    actually change the criticized text.
+    """
+    import re as _re
+
+    quoted = str(
+        issue.draft_text
+        or ""
+    ).strip()
+
+    correction = str(
+        issue.correction
+        or ""
+    ).strip()
+
+    if (
+        not quoted
+        or not correction
+    ):
+        return False
+
+    if (
+        _normalize_audit_guard_text(
+            correction
+        )
+        == _normalize_audit_guard_text(
+            quoted
+        )
+    ):
+        return True
+
+    target = _re.sub(
+        r"^(?:change|replace)\s+(?:it\s+)?"
+        r"(?:to|with)\s*:\s*",
+        "",
+        correction,
+        flags=_re.I,
+    ).strip()
+
+    target = target.strip(
+        "\"'“”"
+    )
+
+    return (
+        _normalize_audit_guard_text(
+            target
+        )
+        == _normalize_audit_guard_text(
+            quoted
+        )
+    )
+
+
+def _protected_public_comment_entity(
+    issue,
+    notes,
+):
+    """
+    Protect a source-supported proper-name phrase in attributed
+    public comment from being canonicalized into a different
+    agenda/entity name.
+
+    Person names retain the older stricter requirement that the
+    auditor's own source_evidence acknowledge the phrase.
+
+    Organization-like names receive an additional protection:
+    when the exact phrase is present in the recording-derived
+    notes, it is authoritative for what the commenter said.
+    """
+    import re as _re
+
+    draft_text = str(
+        issue.draft_text
+        or ""
+    )
+
+    low = draft_text.lower()
+
+    if not any(
+        marker in low
+        for marker in (
+            "speaker",
+            "public comment",
+            "resident",
+            "commenter",
+        )
+    ):
+        return ""
+
+    notes_norm = (
+        _normalize_audit_guard_text(
+            notes
+        )
+    )
+
+    evidence_norm = (
+        _normalize_audit_guard_text(
+            issue.source_evidence
+        )
+    )
+
+    correction_norm = (
+        _normalize_audit_guard_text(
+            issue.correction
+        )
+    )
+
+    proper_name_pattern = (
+        r"\b[A-Z][A-Za-z0-9&./'()-]*"
+        r"(?:\s+(?:"
+        r"[A-Z][A-Za-z0-9&./'()-]*|"
+        r"of|the|and"
+        r")){2,}\b"
+    )
+
+    organization_words = {
+        "association",
+        "authority",
+        "commission",
+        "committee",
+        "company",
+        "corporation",
+        "council",
+        "department",
+        "district",
+        "foundation",
+        "league",
+        "organization",
+        "society",
+        "university",
+    }
+
+    for phrase in _re.findall(
+        proper_name_pattern,
+        draft_text,
+    ):
+        meaningful = [
+            word
+            for word
+            in _re.findall(
+                r"[A-Za-z0-9]+",
+                phrase,
+            )
+            if word.lower()
+            not in {
+                "of",
+                "the",
+                "and",
+            }
+        ]
+
+        if len(
+            meaningful
+        ) < 2:
+            continue
+
+        phrase_norm = (
+            _normalize_audit_guard_text(
+                phrase
+            )
+        )
+
+        if (
+            phrase_norm
+            not in notes_norm
+        ):
+            continue
+
+        if (
+            phrase_norm
+            in correction_norm
+        ):
+            continue
+
+        phrase_words = {
+            word.lower()
+            for word
+            in meaningful
+        }
+
+        organization_like = bool(
+            phrase_words
+            & organization_words
+        )
+
+        # Safest case: the auditor's own source-evidence text
+        # acknowledges the exact source-note phrase that its
+        # correction would overwrite.
+        if (
+            phrase_norm
+            in evidence_norm
+        ):
+            return phrase
+
+        if not organization_like:
+            continue
+
+        # Organization names get one additional narrowly scoped
+        # protection: reject canonicalization into a DIFFERENT
+        # organization name.
+        #
+        # Do not broadly protect every factual claim merely
+        # because the organization itself appears in the notes.
+        # A legitimate correction may need to delete or alter an
+        # unsupported claim about a correctly named organization.
+        replacement_organizations = []
+
+        for replacement_phrase in _re.findall(
+            proper_name_pattern,
+            str(
+                issue.correction
+                or ""
+            ),
+        ):
+            replacement_words = {
+                word.lower()
+                for word
+                in _re.findall(
+                    r"[A-Za-z0-9]+",
+                    replacement_phrase,
+                )
+                if word.lower()
+                not in {
+                    "of",
+                    "the",
+                    "and",
+                }
+            }
+
+            if not (
+                replacement_words
+                & organization_words
+            ):
+                continue
+
+            replacement_norm = (
+                _normalize_audit_guard_text(
+                    replacement_phrase
+                )
+            )
+
+            if (
+                replacement_norm
+                != phrase_norm
+            ):
+                replacement_organizations.append(
+                    replacement_phrase
+                )
+
+        if replacement_organizations:
+            return phrase
+
+    return ""
+
+
+
+def _audit_publishable_person_names(
+    notes,
+):
+    """
+    Parse the canonical human-name whitelist emitted by
+    audit_verification_context().
+
+    The verification layer owns identity/spelling decisions.
+    """
+    text = str(
+        notes or ""
+    )
+
+    marker = (
+        "PUBLISHABLE PERSON NAMES:"
+    )
+
+    start = text.rfind(
+        marker
+    )
+
+    if start < 0:
+        return []
+
+    tail = text[
+        start
+        + len(marker):
+    ]
+
+    names = []
+
+    for raw_line in tail.splitlines():
+        line = raw_line.strip()
+
+        if not line:
+            if names:
+                break
+
+            continue
+
+        if line.startswith(
+            "PERSON-NAME RULE:"
+        ):
+            break
+
+        if not line.startswith(
+            "- "
+        ):
+            if names:
+                break
+
+            continue
+
+        name = line[
+            2:
+        ].strip()
+
+        if (
+            not name
+            or name.upper()
+            == "NONE"
+        ):
+            continue
+
+        if name not in names:
+            names.append(
+                name
+            )
+
+    return names
+
+
+def _protected_publishable_person_rewrite(
+    issue,
+    notes,
+):
+    """
+    Reject an audit attempt that downgrades an already
+    canonical, whitelisted human name to a near-matching raw
+    transcript/agenda spelling that is NOT on the whitelist.
+
+    Examples:
+      Stephanie Oddo -> Stephanie Otto
+      Stephanie Oddo -> Council Member Otto
+
+    This is deliberately NOT a blanket protection of the
+    attribution itself.
+
+    Allowed:
+      Stephanie Oddo -> Stephanie Winstead
+        when BOTH names are verified/whitelisted.
+
+      Stephanie Oddo -> the District 4 representative
+        when an attribution genuinely needs to be generalized.
+    """
+    import difflib as _difflib
+    import re as _re
+
+    whitelist = (
+        _audit_publishable_person_names(
+            notes
+        )
+    )
+
+    if not whitelist:
+        return ""
+
+    draft = str(
+        issue.draft_text
+        or ""
+    )
+
+    correction = str(
+        issue.correction
+        or ""
+    )
+
+    if (
+        not draft
+        or not correction
+    ):
+        return ""
+
+    whitelist_norm = {
+        _normalize_audit_guard_text(
+            name
+        ):
+            name
+        for name in whitelist
+    }
+
+    name_pattern = (
+        r"\b"
+        r"[A-Z][A-Za-z'’.-]+"
+        r"(?:\s+[A-Z][A-Za-z'’.-]+){1,3}"
+        r"\b"
+    )
+
+    candidates = _re.findall(
+        name_pattern,
+        correction,
+    )
+
+    role_words = {
+        "council",
+        "councilmember",
+        "member",
+        "mayor",
+        "commissioner",
+        "supervisor",
+        "director",
+        "manager",
+    }
+
+    def words(
+        value,
+    ):
+        return [
+            word.casefold()
+            for word
+            in _re.findall(
+                r"[A-Za-z'’.-]+",
+                str(
+                    value
+                    or ""
+                ),
+            )
+        ]
+
+    def surname_similarity(
+        left,
+        right,
+    ):
+        return _difflib.SequenceMatcher(
+            None,
+            left,
+            right,
+        ).ratio()
+
+    def surname_phonetic_key(
+        value,
+    ):
+        """
+        Narrow Soundex-style surname key for audit protection.
+
+        Used only after the verification layer has already
+        established a canonical whitelisted person.
+
+        Examples:
+          Oddo -> O300
+          Otto -> O300
+
+        It is NOT used to independently identify a person.
+        """
+        letters = _re.sub(
+            r"[^a-z]",
+            "",
+            str(
+                value
+                or ""
+            ).casefold(),
+        )
+
+        if not letters:
+            return ""
+
+        first = letters[
+            0
+        ].upper()
+
+        groups = {
+            **{
+                char: "1"
+                for char
+                in "bfpv"
+            },
+            **{
+                char: "2"
+                for char
+                in "cgjkqsxz"
+            },
+            **{
+                char: "3"
+                for char
+                in "dt"
+            },
+            "l": "4",
+            **{
+                char: "5"
+                for char
+                in "mn"
+            },
+            "r": "6",
+        }
+
+        previous = groups.get(
+            letters[
+                0
+            ],
+            "",
+        )
+
+        digits = []
+
+        for char in letters[
+            1:
+        ]:
+            code = groups.get(
+                char,
+                "",
+            )
+
+            if not code:
+                # Vowels plus h/w/y break adjacent-code runs.
+                previous = ""
+                continue
+
+            if code != previous:
+                digits.append(
+                    code
+                )
+
+            previous = code
+
+        return (
+            first
+            + "".join(
+                digits
+            )
+            + "000"
+        )[
+            :4
+        ]
+
+    for canonical in whitelist:
+        canonical_pattern = _re.compile(
+            r"(?<!\w)"
+            + _re.escape(
+                canonical
+            )
+            + r"(?!\w)",
+            _re.I,
+        )
+
+        if not canonical_pattern.search(
+            draft
+        ):
+            continue
+
+        canonical_words = words(
+            canonical
+        )
+
+        if len(
+            canonical_words
+        ) < 2:
+            continue
+
+        canonical_first = (
+            canonical_words[
+                0
+            ]
+        )
+
+        canonical_last = (
+            canonical_words[
+                -1
+            ]
+        )
+
+        for candidate in candidates:
+            candidate_norm = (
+                _normalize_audit_guard_text(
+                    candidate
+                )
+            )
+
+            # The current canonical name itself is harmless.
+            if (
+                candidate_norm
+                == _normalize_audit_guard_text(
+                    canonical
+                )
+            ):
+                continue
+
+            # Switching to another independently verified person
+            # is an attribution correction, not an identity
+            # downgrade. Allow it.
+            if (
+                candidate_norm
+                in whitelist_norm
+            ):
+                continue
+
+            candidate_words = words(
+                candidate
+            )
+
+            if len(
+                candidate_words
+            ) < 2:
+                continue
+
+            candidate_first = (
+                candidate_words[
+                    0
+                ]
+            )
+
+            candidate_last = (
+                candidate_words[
+                    -1
+                ]
+            )
+
+            last_similarity = (
+                surname_similarity(
+                    canonical_last,
+                    candidate_last,
+                )
+            )
+
+            canonical_phonetic = (
+                surname_phonetic_key(
+                    canonical_last
+                )
+            )
+
+            candidate_phonetic = (
+                surname_phonetic_key(
+                    candidate_last
+                )
+            )
+
+            same_phonetic_surname = (
+                bool(
+                    canonical_phonetic
+                )
+                and canonical_phonetic
+                == candidate_phonetic
+            )
+
+            same_first_name = (
+                candidate_first
+                == canonical_first
+            )
+
+            role_labeled_variant = bool(
+                set(
+                    candidate_words
+                )
+                & role_words
+            )
+
+            # Exact first name plus either a strong spelling
+            # match or the same narrow surname phonetic key.
+            if (
+                same_first_name
+                and (
+                    last_similarity
+                    >= 0.67
+                    or same_phonetic_surname
+                )
+            ):
+                return canonical
+
+            # Transcript role form such as
+            # "Council Member Otto" for canonical
+            # "Stephanie Oddo".
+            #
+            # The role itself does NOT identify the person.
+            # This only prevents an already-verified canonical
+            # name from being downgraded to its near/raw form.
+            if (
+                role_labeled_variant
+                and (
+                    last_similarity
+                    >= 0.67
+                    or same_phonetic_surname
+                )
+            ):
+                return canonical
+
+    return ""
+
+
+
+def _guard_audit_result(
+    result,
+    story,
+    notes,
+):
+    """
+    Deterministically validate Gemini audit output.
+
+    Critical rule:
+    if an invalid audit complaint is rejected for a field, do
+    NOT allow Gemini's full corrected version of that same field
+    to be applied. The corrected field may contain the rejected
+    edit mixed together with valid edits.
+
+    Failing closed is safer than silently applying a correction
+    that the deterministic guard explicitly rejected.
+    """
+    fields = {
+        "headline":
+            story.headline,
+
+        "dek":
+            story.dek,
+
+        "body":
+            "\n".join(
+                story.body
+            ),
+
+        "key_facts":
+            "\n".join(
+                story.key_facts
+            ),
+
+        "verification_notes":
+            "\n".join(
+                story.verification_notes
+            ),
+    }
+
+    valid_issues = []
+    blocked_fields = set()
+
+    for issue in result.issues:
+        haystack = fields.get(
+            issue.field,
+            "",
+        )
+
+        if (
+            not issue.draft_text
+            or issue.draft_text
+            not in haystack
+        ):
+            continue
+
+        if _audit_issue_correction_is_noop(
+            issue
+        ):
+            print(
+                "    audit guard: dropped no-op correction: "
+                f"{issue.draft_text!r}",
+                flush=True,
+            )
+            continue
+
+        protected_person = (
+            _protected_publishable_person_rewrite(
+                issue,
+                notes,
+            )
+        )
+
+        if protected_person:
+            print(
+                "    audit guard: dropped attempted "
+                "canonical-person downgrade: "
+                f"{protected_person!r}",
+                flush=True,
+            )
+
+            blocked_fields.add(
+                issue.field
+            )
+
+            continue
+
+        protected_entity = (
+            _protected_public_comment_entity(
+                issue,
+                notes,
+            )
+        )
+
+        if protected_entity:
+            print(
+                "    audit guard: dropped attempted "
+                "source-note entity overwrite: "
+                f"{protected_entity!r}",
+                flush=True,
+            )
+
+            blocked_fields.add(
+                issue.field
+            )
+
+            continue
+
+        valid_issues.append(
+            issue
+        )
+
+    result.issues = (
+        valid_issues
+    )
+
+    # If a rejected correction touched a field, Gemini's entire
+    # corrected version of that field is contaminated because it
+    # may contain both accepted and rejected edits.
+    if "headline" in blocked_fields:
+        result.corrected_headline = (
+            story.headline
+        )
+
+    if "dek" in blocked_fields:
+        result.corrected_dek = (
+            story.dek
+        )
+
+    if "body" in blocked_fields:
+        result.corrected_body = list(
+            story.body
+        )
+
+    if "key_facts" in blocked_fields:
+        result.corrected_key_facts = list(
+            story.key_facts
+        )
+
+    if (
+        "verification_notes"
+        in blocked_fields
+    ):
+        result.corrected_verification_notes = list(
+            story.verification_notes
+        )
+
+    material = [
+        issue
+        for issue
+        in valid_issues
+        if str(
+            issue.severity
+        ).lower()
+        == "material"
+    ]
+
+    result.ok = not bool(
+        material
+    )
+
+    if not valid_issues:
+        result.corrected_headline = ""
+        result.corrected_dek = ""
+        result.corrected_body = []
+        result.corrected_key_facts = []
+        result.corrected_verification_notes = []
+
+    return result
+
+
+
 def audit_story(meeting: dict, notes: str, agenda: str, story: StoryDraft) -> AuditResult:
     c = client()
     article = {
@@ -317,6 +1209,47 @@ Do NOT fail the draft because a fact appears in key_facts rather than body.
 Do NOT treat a purely stylistic preference as a material
 factual error.
 
+AUDIT STABILITY / NO-CHURN RULES:
+
+- Never return an issue whose proposed correction is identical
+  to the criticized draft text.
+
+- Do not flag a factually supported sentence merely because a
+  different equally supported phrasing is possible.
+
+- Agenda-section wording is OPTIONAL unless the draft itself
+  states or materially implies an incorrect section.
+
+- Do not require a supported specific Council action to be
+  rewritten as "a series of items on the Consent Calendar" or
+  require adding "as part of the Consent Calendar" merely for
+  stylistic completeness.
+
+- "speaker", "resident" and "public commenter" are all acceptable
+  neutral attribution labels when the supplied notes establish
+  that the statement occurred during public comment. Do not flag
+  one merely to prefer another.
+
+- PUBLISHABLE PERSON NAMES are the canonical identity and
+  spelling authority. If the draft uses a whitelisted canonical
+  person name, NEVER replace it with a raw transcript or agenda
+  spelling that is not itself on the whitelist.
+
+- If attribution is genuinely wrong, you may replace the person
+  with another WHITELISTED canonical person or remove/generalize
+  the attribution. Do not downgrade a verified canonical spelling
+  to a phonetic/raw variant.
+
+- When attributed public-comment wording uses an organization
+  name that appears explicitly in the recording-derived notes,
+  preserve that source-note organization name. Do not replace it
+  with a similar organization from the agenda, verification
+  context or another evidence stream.
+
+- A correction must repair an actual source conflict or
+  unsupported factual claim, not merely rearrange supported
+  information.
+
 However, wording is NOT merely stylistic when it adds or
 strengthens a motive, consequence, causal relationship,
 technical relationship, emotional characterization, policy
@@ -435,112 +1368,8 @@ DRAFT JSON:
     )
     result = AuditResult.model_validate_json(response.text)
 
-    # Deterministic guardrail: reject hallucinated audit complaints.
-    fields = {
-        "headline": story.headline,
-        "dek": story.dek,
-        "body": "\n".join(story.body),
-        "key_facts": "\n".join(story.key_facts),
-        "verification_notes": "\n".join(story.verification_notes),
-    }
-    def _protected_public_comment_entity(issue):
-        """
-        Return a source-supported proper-name phrase when an audit correction
-        tries to overwrite that phrase in attributed public comment.
-
-        This is intentionally narrow. It does not decide whether an article
-        claim is true in general; it only prevents the auditor from replacing
-        an entity that is explicitly present in the recording-derived notes
-        with a different agenda entity.
-        """
-        import re as _re
-
-        draft_text = issue.draft_text or ""
-        low = draft_text.lower()
-
-        if not any(
-            marker in low
-            for marker in ("speaker", "public comment", "resident")
-        ):
-            return ""
-
-        def _norm(value):
-            value = (value or "").replace(chr(8217), "'")
-
-            # Source notes may contain Markdown emphasis around only part of
-            # an entity name, e.g. **Orange County League** of Cities.
-            # Strip presentation markup before doing evidence comparisons.
-            value = value.replace("*", "").replace("`", "")
-
-            value = _re.sub(r"\s+", " ", value)
-            return value.strip().lower()
-
-        notes_norm = _norm(notes)
-        evidence_norm = _norm(issue.source_evidence)
-        correction_norm = _norm(issue.correction)
-
-        # Find multi-word proper-name phrases such as:
-        # Orange County League of Cities
-        proper_name_pattern = (
-            r"\b[A-Z][A-Za-z0-9&./'()-]*"
-            r"(?:\s+(?:[A-Z][A-Za-z0-9&./'()-]*|of|the|and)){2,}\b"
-        )
-
-        for phrase in _re.findall(proper_name_pattern, draft_text):
-            meaningful_words = [
-                word
-                for word in phrase.split()
-                if word.lower() not in {"of", "the", "and"}
-            ]
-
-            if len(meaningful_words) < 2:
-                continue
-
-            phrase_norm = _norm(phrase)
-
-            if (
-                phrase_norm in notes_norm
-                and phrase_norm in evidence_norm
-                and phrase_norm not in correction_norm
-            ):
-                return phrase
-
-        return ""
-
-    valid_issues = []
-    for issue in result.issues:
-        haystack = fields.get(issue.field, "")
-        if issue.draft_text and issue.draft_text in haystack:
-            protected_entity = _protected_public_comment_entity(issue)
-
-            if protected_entity:
-                print(
-                    "    audit guard: dropped attempted source-note entity "
-                    f"overwrite: {protected_entity!r}",
-                    flush=True,
-                )
-                continue
-
-            valid_issues.append(issue)
-
-    result.issues = valid_issues
-
-    material = [
-        i
-        for i in valid_issues
-        if i.severity.lower() == "material"
-    ]
-
-    result.ok = not bool(material)
-
-    # Keep corrected fields whenever ANY valid issue remains,
-    # including minor errors. process_city can then apply the
-    # supplied correction instead of knowingly saving the error.
-    if not valid_issues:
-        result.corrected_headline = ""
-        result.corrected_dek = ""
-        result.corrected_body = []
-        result.corrected_key_facts = []
-        result.corrected_verification_notes = []
-
-    return result
+    return _guard_audit_result(
+        result,
+        story,
+        notes,
+    )

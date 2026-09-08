@@ -1233,24 +1233,37 @@ def _remove_validated_unclear_formal_claims(
     intelligence,
 ):
     """
-    Fail closed when a validated ledger record says its formal
-    disposition is UNCLEAR but reader-facing copy nevertheless
-    claims a formal Council action.
+    Fail closed when a ledger record maps to a concrete agenda
+    item but its formal disposition is UNCLEAR and reader-facing
+    copy nevertheless claims a formal Council action.
+
+    A ledger row may itself be unvalidated precisely because the
+    claimed formal-action evidence failed source validation. Such
+    a row must never authorize strong reader-facing action language.
+
+    We therefore trust an UNCLEAR row for fail-closed removal when:
+
+      * it is already validated; OR
+      * it has a concrete item number + agenda section and no
+        agenda-linkage conflict.
+
+    Unmapped, unvalidated UNCLEAR rows remain too ambiguous to use
+    for deterministic topic deletion.
 
     There is no evidence-safe replacement verb for UNCLEAR.
 
-    Remove only the prose sentence/fact containing the unsupported
-    formal claim. Preserve unrelated supported sentences.
+    Remove only the unsupported formal sentence/fact. Preserve
+    unrelated supported sentences. For summary copy containing
+    several formal clauses, remove only clauses linked to UNCLEAR
+    actions when a safe clause boundary exists.
 
-    Sentence splitting protects common abbreviations such as:
+    A directly dependent follow-up sentence such as:
 
-      Sonitrol, Inc.
-      Resolution No. 2026-1539
-      Mr. Smith
-      Dr. Smith
-      U.S.
+      "The Council waived formal bidding requirements for this
+       contract."
 
-    so an abbreviation cannot leave an orphan clause behind.
+    is also removed when the immediately preceding unsupported
+    contract/action sentence is removed.
     """
     unclear_actions = [
         action
@@ -1259,17 +1272,42 @@ def _remove_validated_unclear_formal_claims(
             [],
         )
         if (
-            action.get(
-                "validated"
-            )
-            is True
-            and str(
+            str(
                 action.get(
                     "action_status",
                     "",
                 )
             ).strip().lower()
             == "unclear"
+            and not bool(
+                action.get(
+                    "agenda_linkage_conflict"
+                )
+            )
+            and (
+                action.get(
+                    "validated"
+                )
+                is True
+                or (
+                    bool(
+                        str(
+                            action.get(
+                                "item_number",
+                                "",
+                            )
+                        ).strip()
+                    )
+                    and bool(
+                        str(
+                            action.get(
+                                "agenda_section",
+                                "",
+                            )
+                        ).strip()
+                    )
+                )
+            )
         )
     ]
 
@@ -1326,22 +1364,32 @@ def _remove_validated_unclear_formal_claims(
         "passes",
         "passed",
         "passing",
+
+        "waive",
+        "waives",
+        "waived",
+        "waiving",
     }
 
-    formal_pattern = re.compile(
-        r"\b(?:"
-        + "|".join(
+    formal_word_source = (
+        "|".join(
             sorted(
                 (
                     re.escape(
                         word
                     )
-                    for word in formal_words
+                    for word
+                    in formal_words
                 ),
                 key=len,
                 reverse=True,
             )
         )
+    )
+
+    formal_pattern = re.compile(
+        r"\b(?:"
+        + formal_word_source
         + r")\b",
         re.I,
     )
@@ -1386,10 +1434,73 @@ def _remove_validated_unclear_formal_claims(
             )
         }
 
-    unclear_cue_sets = []
+    # Normal token matching intentionally treats "agenda" as a
+    # generic Council word. That is usually correct, but it loses
+    # an important lexical relationship in phrases such as:
+    #
+    #   ledger: "Agenda Management Software"
+    #   copy:   "agenda management subscription services"
+    #
+    # Keep the >=2 meaningful-token rule, and supplement it only
+    # with exact adjacent two-word phrase anchors.
+    phrase_stopwords = {
+        *stopwords,
+        "approval",
+        "appointment",
+    }
+
+    # "agenda" is generic by itself, but meaningful as part of
+    # an exact adjacent phrase such as "agenda management".
+    phrase_stopwords.discard(
+        "agenda"
+    )
+
+    def phrase_anchors(
+        value,
+    ):
+        # Preserve ORIGINAL adjacency. Do not remove stopwords
+        # before pairing, because that can manufacture a phrase
+        # that never appeared in the source text.
+        words = re.findall(
+            r"[a-z0-9]+",
+            str(
+                value or ""
+            ).lower(),
+        )
+
+        anchors = set()
+
+        for index in range(
+            len(words) - 1
+        ):
+            first = words[
+                index
+            ]
+
+            second = words[
+                index + 1
+            ]
+
+            if (
+                len(first) < 4
+                or len(second) < 4
+                or first in phrase_stopwords
+                or second in phrase_stopwords
+            ):
+                continue
+
+            anchors.add(
+                first
+                + " "
+                + second
+            )
+
+        return anchors
+
+    unclear_signatures = []
 
     for action in unclear_actions:
-        cues = tokens(
+        identity = (
             str(
                 action.get(
                     "topic",
@@ -1405,14 +1516,26 @@ def _remove_validated_unclear_formal_claims(
             )
         )
 
-        if len(
-            cues
-        ) >= 2:
-            unclear_cue_sets.append(
-                cues
+        cues = tokens(
+            identity
+        )
+
+        anchors = phrase_anchors(
+            identity
+        )
+
+        if (
+            len(cues) >= 2
+            or anchors
+        ):
+            unclear_signatures.append(
+                (
+                    cues,
+                    anchors,
+                )
             )
 
-    if not unclear_cue_sets:
+    if not unclear_signatures:
         return False
 
     def unsupported_formal_claim(
@@ -1431,13 +1554,26 @@ def _remove_validated_unclear_formal_claims(
             value
         )
 
-        return any(
-            len(
-                value_tokens
-                & cues
+        value_phrase_anchors = (
+            phrase_anchors(
+                value
             )
-            >= 2
-            for cues in unclear_cue_sets
+        )
+
+        return any(
+            (
+                len(
+                    value_tokens
+                    & cues
+                )
+                >= 2
+            )
+            or bool(
+                value_phrase_anchors
+                & anchors
+            )
+            for cues, anchors
+            in unclear_signatures
         )
 
     abbreviation_pattern = re.compile(
@@ -1454,9 +1590,23 @@ def _remove_validated_unclear_formal_claims(
         r"\b(?:[A-Za-z]\.){2,}"
     )
 
-    placeholder = (
-        "\uE000"
+    # A single middle initial must not become a sentence boundary.
+    #
+    # Example:
+    #
+    #   "Anne D. Figueroa"
+    #
+    # Without this protection the fail-closed action guard sees:
+    #
+    #   "The Council appointed ... Anne D."
+    #   "Figueroa to serve as the voting delegate ..."
+    #
+    # which separates the formal verb from the topical evidence.
+    single_middle_initial_pattern = re.compile(
+        r"\b[A-Z]\.(?=\s+[A-Z][a-z])"
     )
+
+    placeholder = "\uE000"
 
     def protect_abbreviation_periods(
         value,
@@ -1465,9 +1615,7 @@ def _remove_validated_unclear_formal_claims(
             lambda match:
                 match.group(
                     0
-                )[
-                    :-1
-                ]
+                )[:-1]
                 + placeholder,
             value,
         )
@@ -1480,6 +1628,15 @@ def _remove_validated_unclear_formal_claims(
                     ".",
                     placeholder,
                 ),
+            value,
+        )
+
+        value = single_middle_initial_pattern.sub(
+            lambda match:
+                match.group(
+                    0
+                )[:-1]
+                + placeholder,
             value,
         )
 
@@ -1513,8 +1670,22 @@ def _remove_validated_unclear_formal_claims(
             restore_abbreviation_periods(
                 part
             )
-            for part in parts
+            for part
+            in parts
         ]
+
+    dependent_reference_pattern = re.compile(
+        r"\b(?:this|that|these|those)\s+"
+        r"(?:"
+        r"contract|contracts|"
+        r"agreement|agreements|"
+        r"item|items|"
+        r"resolution|resolutions|"
+        r"ordinance|ordinances|"
+        r"purchase\s+order|purchase\s+orders"
+        r")\b",
+        re.I,
+    )
 
     def scrub(
         value,
@@ -1532,31 +1703,63 @@ def _remove_validated_unclear_formal_claims(
 
         for index in range(
             0,
-            len(
-                parts
-            ),
+            len(parts),
             2,
         ):
             sentence = parts[
                 index
             ]
 
-            if unsupported_formal_claim(
+            if not unsupported_formal_claim(
                 sentence
             ):
+                continue
+
+            parts[
+                index
+            ] = ""
+
+            if (
+                index + 1
+                < len(parts)
+            ):
                 parts[
-                    index
+                    index + 1
                 ] = ""
 
+            next_index = (
+                index + 2
+            )
+
+            if (
+                next_index
+                < len(parts)
+            ):
+                next_sentence = (
+                    parts[
+                        next_index
+                    ]
+                )
+
                 if (
-                    index + 1
-                    < len(
-                        parts
+                    formal_pattern.search(
+                        next_sentence
+                    )
+                    and dependent_reference_pattern.search(
+                        next_sentence
                     )
                 ):
                     parts[
-                        index + 1
+                        next_index
                     ] = ""
+
+                    if (
+                        next_index + 1
+                        < len(parts)
+                    ):
+                        parts[
+                            next_index + 1
+                        ] = ""
 
         cleaned = "".join(
             parts
@@ -1570,9 +1773,96 @@ def _remove_validated_unclear_formal_claims(
 
         return cleaned
 
+    summary_clause_split_pattern = re.compile(
+        r"[,;]\s+"
+        r"(?="
+        r"(?:and\s+|but\s+)?"
+        r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
+        r"(?:"
+        + formal_word_source
+        + r")\b"
+        r")",
+        re.I,
+    )
+
+    def scrub_summary(
+        value,
+    ):
+        value = str(
+            value or ""
+        )
+
+        if (
+            not value
+            or not unsupported_formal_claim(
+                value
+            )
+        ):
+            return value
+
+        clauses = (
+            summary_clause_split_pattern.split(
+                value
+            )
+        )
+
+        if len(
+            clauses
+        ) <= 1:
+            return scrub(
+                value
+            )
+
+        kept = []
+
+        for clause in clauses:
+            clause = clause.strip()
+
+            if not clause:
+                continue
+
+            if unsupported_formal_claim(
+                clause
+            ):
+                continue
+
+            clause = re.sub(
+                r"^(?:and|but)\s+",
+                "",
+                clause,
+                flags=re.I,
+            ).strip()
+
+            clause = clause.rstrip(
+                " .!?"
+            )
+
+            if clause:
+                kept.append(
+                    clause
+                )
+
+        if not kept:
+            return ""
+
+        cleaned = ", ".join(
+            kept
+        )
+
+        ending = value.rstrip()[-1:]
+
+        if ending in {
+            ".",
+            "!",
+            "?",
+        }:
+            cleaned += ending
+
+        return cleaned
+
     changed = False
 
-    new_headline = scrub(
+    new_headline = scrub_summary(
         story.headline
     )
 
@@ -1580,7 +1870,7 @@ def _remove_validated_unclear_formal_claims(
         story.headline = new_headline
         changed = True
 
-    new_dek = scrub(
+    new_dek = scrub_summary(
         story.dek
     )
 
@@ -1622,6 +1912,209 @@ def _remove_validated_unclear_formal_claims(
 
     return changed
 
+
+
+def reconcile_entity_verification_notes(
+    story,
+    intelligence,
+):
+    """
+    Reconcile the standard CouncilWatch "remains unverified"
+    verification note when fresh entity verification now establishes
+    that the exact observed source form is VERIFIED or CORRECTED.
+
+    This is intentionally exact and conservative:
+
+      * person entities only;
+      * VERIFIED/CORRECTED only;
+      * official source URL required;
+      * the verification note's source reference must match the
+        entity's observed_text;
+      * unrelated unverified names remain untouched.
+    """
+    entities = intelligence.get(
+        "entities",
+        [],
+    )
+
+    def identity_key(
+        value,
+    ):
+        return " ".join(
+            re.findall(
+                r"[a-z0-9]+",
+                str(
+                    value or ""
+                ).casefold(),
+            )
+        )
+
+    resolved = {}
+
+    for entity in entities:
+        if str(
+            entity.get(
+                "entity_type",
+                "",
+            )
+        ).casefold() != "person":
+            continue
+
+        status = str(
+            entity.get(
+                "status",
+                "",
+            )
+        ).upper()
+
+        if status not in {
+            "VERIFIED",
+            "CORRECTED",
+        }:
+            continue
+
+        observed = str(
+            entity.get(
+                "observed_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        canonical = str(
+            entity.get(
+                "canonical_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        official_url = str(
+            entity.get(
+                "official_source_url",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if (
+            not observed
+            or not canonical
+            or not official_url
+        ):
+            continue
+
+        resolved[
+            identity_key(
+                observed
+            )
+        ] = {
+            "observed":
+                observed,
+            "canonical":
+                canonical,
+            "status":
+                status,
+        }
+
+    if not resolved:
+        return False
+
+    stale_pattern = re.compile(
+        r"^The identity associated with the source reference "
+        r"(?P<quote>['\"])(?P<observed>.+?)(?P=quote) "
+        r"remains unverified; CouncilWatch did not rely on that "
+        r"name as an identified person\.$",
+        re.I,
+    )
+
+    new_notes = []
+
+    for note in (
+        story.verification_notes
+        or []
+    ):
+        note = str(
+            note
+            or ""
+        )
+
+        match = stale_pattern.fullmatch(
+            note.strip()
+        )
+
+        if not match:
+            new_notes.append(
+                note
+            )
+            continue
+
+        observed = match.group(
+            "observed"
+        )
+
+        entity = resolved.get(
+            identity_key(
+                observed
+            )
+        )
+
+        if not entity:
+            new_notes.append(
+                note
+            )
+            continue
+
+        canonical = entity[
+            "canonical"
+        ]
+
+        status = entity[
+            "status"
+        ]
+
+        if (
+            status == "CORRECTED"
+            and identity_key(
+                observed
+            )
+            != identity_key(
+                canonical
+            )
+        ):
+            replacement = (
+                "The source reference "
+                f"'{observed}' was corrected to "
+                f"{canonical} using official source "
+                "verification."
+            )
+        else:
+            replacement = (
+                "The identity associated with the source "
+                f"reference '{observed}' was verified as "
+                f"{canonical} using official source "
+                "verification."
+            )
+
+        if replacement not in new_notes:
+            new_notes.append(
+                replacement
+            )
+
+    if (
+        new_notes
+        == list(
+            story.verification_notes
+            or []
+        )
+    ):
+        return False
+
+    story.verification_notes = (
+        new_notes
+    )
+
+    return True
 
 
 def normalize_validated_action_language(
@@ -2697,6 +3190,12 @@ def process_city(
         ):
             public_guard_changed = True
 
+        if reconcile_entity_verification_notes(
+            story,
+            intelligence,
+        ):
+            public_guard_changed = True
+
         if restore_required_topics_from_key_facts(
             story,
             intelligence,
@@ -2782,6 +3281,12 @@ def process_city(
                 ):
                     changed = True
 
+                if reconcile_entity_verification_notes(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
                 if restore_required_topics_from_key_facts(
                     story,
                     intelligence,
@@ -2851,6 +3356,12 @@ def process_city(
                     changed = True
 
                 if normalize_validated_action_language(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if reconcile_entity_verification_notes(
                     story,
                     intelligence,
                 ):
