@@ -33,7 +33,12 @@ def _run(cmd: list[str]) -> None:
 
 
 def _normalize(url: str) -> str:
-    return html.unescape(url).replace("\\/", "/").strip()
+    value = html.unescape(url).replace("\\/", "/").strip()
+
+    if value.startswith("//"):
+        return "https:" + value
+
+    return value
 
 
 def _ffmpeg_audio(input_url: str, output: Path, referer: str = "") -> Path:
