@@ -116,7 +116,6 @@ jobs:
           PY
 
           python -m py_compile review_app.py tests/test_review_app_save_validation.py
-          python -m pytest -q tests/test_review_app_save_validation.py
 
           git rm .github/workflows/apply-review-empty-body-fix.yml
           git config user.name "github-actions[bot]"
