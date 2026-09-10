@@ -1346,10 +1346,25 @@ async def save_story(
             status_code=400,
         )
 
-    if (
-        not isinstance(body, list)
-        or not body
+    if not isinstance(
+        body,
+        list,
     ):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Article body cannot be blank.",
+            },
+            status_code=400,
+        )
+
+    normalized_body = [
+        str(x).strip()
+        for x in body
+        if str(x).strip()
+    ]
+
+    if not normalized_body:
         return JSONResponse(
             {
                 "ok": False,
@@ -1366,11 +1381,9 @@ async def save_story(
     target["headline"] = headline
     target["dek"] = dek
 
-    target["body"] = [
-        str(x).strip()
-        for x in body
-        if str(x).strip()
-    ]
+    target["body"] = (
+        normalized_body
+    )
 
     target["key_facts"] = [
         str(x).strip()
