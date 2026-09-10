@@ -168,7 +168,7 @@ def test_backup_shell_and_home(env):
             "cities": {
                 "beta": {
                     "phase": "failed",
-                    "message": "Fetcher failed | detailed traceback",
+                    "message": "Fetcher failed | " + ("detailed traceback " * 20),
                 }
             }
         }),
