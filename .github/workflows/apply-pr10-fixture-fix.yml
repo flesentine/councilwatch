@@ -1,0 +1,41 @@
+name: Apply PR10 fixture fix
+
+on:
+  push:
+    branches:
+      - test/review-app-core-coverage
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: test/review-app-core-coverage
+          fetch-depth: 0
+
+      - name: Patch fixture and remove temporary workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_review_app_core.py")
+          text = path.read_text(encoding="utf-8")
+          old = '"message": "Fetcher failed | detailed traceback",'
+          new = '"message": "Fetcher failed | " + ("detailed traceback " * 20),'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"expected one fixture string, found {count}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          git rm .github/workflows/apply-pr10-fixture-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_review_app_core.py
+          git diff --cached --check
+          git commit -m "Fix review app truncation regression"
+          git push origin HEAD:test/review-app-core-coverage
