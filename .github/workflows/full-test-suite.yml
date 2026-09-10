@@ -22,6 +22,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
+      COVERAGE_FLOOR: "17.0"
 
     steps:
       - name: Check out repository
@@ -49,6 +50,7 @@ jobs:
           python -m pytest -q \
             --cov=. \
             --cov-config=.coveragerc \
+            --cov-fail-under="$COVERAGE_FLOOR" \
             --cov-report=term-missing \
             --cov-report=json:coverage.json \
             --cov-report=xml:coverage.xml
@@ -69,12 +71,14 @@ jobs:
           branches = totals.get("num_branches", 0)
           covered_branches = totals.get("covered_branches", 0)
           percent = float(totals.get("percent_covered", 0.0))
+          floor = float(os.environ["COVERAGE_FLOOR"])
 
           summary = os.environ["GITHUB_STEP_SUMMARY"]
 
           with open(summary, "a", encoding="utf-8") as fh:
               fh.write("## Coverage\n\n")
               fh.write(f"**Total coverage: {percent:.1f}%**\n\n")
+              fh.write(f"Required floor: **{floor:.1f}%**\n\n")
               fh.write("| Metric | Value |\n")
               fh.write("| --- | ---: |\n")
               fh.write(f"| Statements | {statements} |\n")
