@@ -235,7 +235,8 @@ def test_shell_escapes_title_but_preserves_supplied_markup():
     text = response_text(page)
 
     assert "<strong>Body</strong>" in text
-    assert "<title>&lt;unsafe&gt;&amp;&quot;</n    assert "CouncilWatch" in text
+    assert "<title>&lt;unsafe&gt;&amp;&quot;</title>" in text
+    assert "CouncilWatch" in text
 
 
 def test_home_renders_queue_counts_and_processing_cards(review_env):
@@ -353,6 +354,7 @@ def test_story_publication_and_audit_labels(review_env):
     published["published"] = False
     published["audit_ok"] = False
     published["audit_status"] = "stale_after_manual_edit"
+    published["newsletter_draft_id"] = ""
     published["newsletter_draft_error"] = "network down"
     review.write_json(
         review_env["drafts"] / "alpha--100.json",
@@ -379,7 +381,7 @@ def test_edit_story_404_and_form_render(review_env):
     text = response_text(review.edit_story("alpha", "100"))
 
     assert "Edit draft" in text
-    assert "Headline &lt;unsafe&gt; &quot; in text
+    assert "Headline &lt;unsafe&gt; &quot;quoted&quot;" in text
     assert "Paragraph one.\n\nParagraph two." in text
     assert "Fact one\nFact two" in text
     assert "Note one\nNote two" in text
@@ -484,7 +486,16 @@ def test_review_action_approve_and_reject_published(review_env, monkeypatch):
     assert removed == ["100"]
 
 
-def test_save_story_rejects_bad_payloads(review_env):
+def test_save_story_rejects_missing_and_bad_payloads(review_env):
+    missing = asyncio.run(
+        review.save_story(
+            "alpha",
+            "404",
+            FakeRequest({"headline": "Headline", "body": ["Body"]}),
+        )
+    )
+    assert missing.status_code == 404
+
     data = make_draft()
     write_draft(review_env, data)
 
@@ -715,7 +726,10 @@ def test_unpublish_story(review_env, monkeypatch):
     assert stored["unpublished_at"] == result["unpublished_at"]
 
 
-def test_reaudit_missing_source_notes(review_env):
+def test_reaudit_missing_draft_and_source_notes(review_env):
+    missing = review.reaudit_story("alpha", "404")
+    assert missing.status_code == 404
+
     data = make_draft()
     write_draft(review_env, data)
 
