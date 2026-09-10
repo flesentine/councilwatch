@@ -1,0 +1,14 @@
+[run]
+branch = True
+source = .
+omit =
+    tests/*
+    discovery/tests/*
+    .venv/*
+    */site-packages/*
+
+[report]
+show_missing = True
+precision = 1
+exclude_lines =
+    pragma: no cover
