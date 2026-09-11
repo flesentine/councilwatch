@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agenda import agenda_text
 from gemini_worker import (
+    AuditIssue,
     make_source_notes,
     make_story,
     audit_story,
@@ -23,6 +24,8 @@ from meeting_intelligence import (
     make_rich_story,
     make_comprehensive_source_notes,
     retry_api_call,
+    _conduit_financing_agenda_contexts,
+    _conduit_text_matches_context,
 )
 from notifications import notify_ready_for_review
 from settings import (
@@ -79,6 +82,402 @@ def update_status(
     status["cities"][slug] = payload
 
     write_status(status)
+
+
+def unresolved_high_priority_formal_action_issues(
+    story,
+    intelligence,
+):
+    """
+    Fail closed when a high-priority formal-action agenda item has
+    no verified final disposition.
+
+    An agenda recommendation to approve/adopt/authorize is not
+    evidence that the council actually did so. But a lead or other
+    high-priority MUST INCLUDE item may not pass final audit while
+    its validated ledger remains only discussed/considered/unclear.
+    """
+    coverage_items = [
+        item
+        for item in intelligence.get(
+            "coverage_items",
+            [],
+        )
+        if (
+            item.get("must_include")
+            and (
+                int(item.get("rank") or 999) == 1
+                or int(item.get("score") or 0) >= 8
+            )
+        )
+    ]
+
+    if not coverage_items:
+        return []
+
+    formal_intent = re.compile(
+        r"\b(?:"
+        r"approval|approve|approved|"
+        r"adopt|adoption|adopted|"
+        r"authorize|authorization|authorized|"
+        r"award|awarded|"
+        r"appoint|appointment|appointed|"
+        r"direct|direction|directed|"
+        r"accept|acceptance|accepted|"
+        r"pass|passed|"
+        r"deny|denial|denied|"
+        r"reject|rejection|rejected"
+        r")\b",
+        re.I,
+    )
+
+    unresolved_statuses = {
+        "unclear",
+        "unknown",
+        "discussed",
+        "considered",
+        "reviewed",
+        "no council action",
+        "no action",
+    }
+
+    stopwords = {
+        "agenda",
+        "approval",
+        "approve",
+        "approved",
+        "city",
+        "council",
+        "item",
+        "public",
+        "resolution",
+        "the",
+        "with",
+        "from",
+        "for",
+    }
+
+    def tokens(value):
+        return {
+            token
+            for token in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").casefold(),
+            )
+            if len(token) >= 4
+            and token not in stopwords
+        }
+
+    ledger = intelligence.get(
+        "action_ledger",
+        [],
+    )
+
+    issues = []
+
+    for coverage in coverage_items:
+        coverage_topic = str(
+            coverage.get(
+                "topic",
+                "",
+            )
+        ).strip()
+        coverage_tokens = tokens(
+            coverage_topic
+        )
+
+        if len(coverage_tokens) < 2:
+            continue
+
+        candidates = []
+
+        for action in ledger:
+            if action.get("validated") is not True:
+                continue
+
+            action_status = str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+
+            if action_status in ACTION_FORMAL_STATUSES:
+                continue
+
+            if action_status not in unresolved_statuses:
+                continue
+
+            section = str(
+                action.get(
+                    "agenda_section",
+                    "",
+                )
+            ).strip().upper()
+
+            if section == "CONSENT CALENDAR":
+                continue
+
+            agenda_title = str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+            ).strip()
+
+            if not formal_intent.search(
+                agenda_title
+            ):
+                continue
+
+            action_tokens = tokens(
+                str(
+                    action.get(
+                        "topic",
+                        "",
+                    )
+                )
+                + " "
+                + agenda_title
+            )
+            overlap = len(
+                coverage_tokens
+                & action_tokens
+            )
+
+            if overlap < 2:
+                continue
+
+            candidates.append(
+                (overlap, action)
+            )
+
+        if not candidates:
+            continue
+
+        candidates.sort(
+            key=lambda entry: entry[0],
+            reverse=True,
+        )
+        action = candidates[0][1]
+
+        item_number = str(
+            action.get(
+                "item_number",
+                "",
+            )
+        ).strip()
+        agenda_title = str(
+            action.get(
+                "agenda_title",
+                "",
+            )
+        ).strip()
+        action_status = str(
+            action.get(
+                "action_status",
+                "unclear",
+            )
+        ).strip().lower()
+
+        field = "headline"
+        draft_text = str(
+            story.headline or ""
+        ).strip()
+
+        if not draft_text:
+            field = "dek"
+            draft_text = str(
+                story.dek or ""
+            ).strip()
+
+        if not draft_text and story.body:
+            field = "body"
+            draft_text = str(
+                story.body[0] or ""
+            ).strip()
+
+        if not draft_text:
+            continue
+
+        item_label = (
+            f"Agenda item {item_number}"
+            if item_number
+            else "The official agenda item"
+        )
+
+        issues.append(
+            AuditIssue(
+                severity="material",
+                field=field,
+                draft_text=draft_text,
+                source_evidence=(
+                    f"{item_label} calls for formal action "
+                    f"({agenda_title}), but CouncilWatch's "
+                    "source-validated action ledger only "
+                    f"establishes '{action_status}'. The final "
+                    "council disposition is unresolved."
+                ),
+                correction=(
+                    "Verify the same item's motion/vote from the "
+                    "recording or another official result source. "
+                    "Do not infer approval or adoption from the "
+                    "agenda recommendation alone."
+                ),
+            )
+        )
+
+    return issues
+
+
+def unsupported_conduit_financing_story_issues(
+    story,
+    agenda,
+):
+    """
+    Fail closed when publishable copy assigns a matched third-party
+    conduit-financing item to City debt/borrowing without official
+    support, while leaving unrelated City debt items alone.
+    """
+    contexts = [
+        context
+        for context in _conduit_financing_agenda_contexts(
+            agenda
+        )
+        if not context.get(
+            "city_obligation"
+        )
+    ]
+
+    if not contexts:
+        return []
+
+    unsupported = re.compile(
+        r"\b(?:"
+        r"city\s+debt(?:\s+issuance)?|"
+        r"city\s+borrowing|"
+        r"municipal\s+debt(?:\s+issuance)?|"
+        r"public\s+debt\s+issuance\s+within\s+the\s+city|"
+        r"public\s+debt\s+(?:issued|issuance)\s+by\s+the\s+city|"
+        r"debt\s+issued\s+by\s+the\s+city"
+        r")\b",
+        re.I,
+    )
+
+    fields = [
+        (
+            "headline",
+            [story.headline],
+        ),
+        (
+            "dek",
+            [story.dek],
+        ),
+        (
+            "body",
+            story.body,
+        ),
+        (
+            "key_facts",
+            story.key_facts,
+        ),
+    ]
+
+    issues = []
+    seen = set()
+
+    for field, values in fields:
+        for raw_value in values:
+            value = str(
+                raw_value or ""
+            ).strip()
+
+            if (
+                not value
+                or not unsupported.search(
+                    value
+                )
+            ):
+                continue
+
+            if field == "headline":
+                scoped_text = value
+
+            elif field == "dek":
+                scoped_text = " ".join(
+                    [
+                        str(story.headline or ""),
+                        value,
+                    ]
+                )
+
+            else:
+                # Body paragraphs and key facts must identify the
+                # conduit-financing item locally. Do not inherit
+                # anchors from another topic in the headline/dek.
+                scoped_text = value
+
+            matching_context = next(
+                (
+                    context
+                    for context in contexts
+                    if _conduit_text_matches_context(
+                        scoped_text,
+                        context,
+                    )
+                ),
+                None,
+            )
+
+            if not matching_context:
+                continue
+
+            key = (
+                field,
+                value,
+            )
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            item_number = matching_context.get(
+                "item_number",
+                "",
+            )
+
+            issue_label = (
+                f"Official agenda item {item_number}"
+                if item_number
+                else "The matched official agenda item"
+            )
+
+            issues.append(
+                AuditIssue(
+                    severity="material",
+                    field=field,
+                    draft_text=value,
+                    source_evidence=(
+                        f"{issue_label} describes a tax-exempt "
+                        "loan issued by a separate development/"
+                        "financing authority for another "
+                        "beneficiary and does not establish the "
+                        "City as borrower, obligor, debtor, "
+                        "guarantor, or financially liable."
+                    ),
+                    correction=(
+                        "Describe the financing and the council's "
+                        "approval role precisely without calling "
+                        "it City debt, City borrowing, municipal "
+                        "debt, or debt issued by the City unless "
+                        "official evidence establishes that "
+                        "obligation."
+                    ),
+                )
+            )
+
+    return issues
 
 
 def strip_public_agenda_item_numbers(story):
@@ -3430,6 +3829,47 @@ def process_city(
                 "  exact-copy material:",
                 len(material),
             )
+
+        deterministic_action_issues = (
+            unresolved_high_priority_formal_action_issues(
+                story,
+                intelligence,
+            )
+        )
+
+        deterministic_action_issues.extend(
+            unsupported_conduit_financing_story_issues(
+                story,
+                agenda,
+            )
+        )
+
+        if deterministic_action_issues:
+            existing_issue_keys = {
+                (
+                    issue.field,
+                    issue.draft_text,
+                    issue.source_evidence,
+                )
+                for issue in valid_issues
+            }
+
+            for issue in deterministic_action_issues:
+                key = (
+                    issue.field,
+                    issue.draft_text,
+                    issue.source_evidence,
+                )
+
+                if key not in existing_issue_keys:
+                    valid_issues.append(issue)
+                    existing_issue_keys.add(key)
+
+            material = [
+                issue
+                for issue in valid_issues
+                if issue.severity.lower() == "material"
+            ]
 
         final_ok = len(material) == 0
 
