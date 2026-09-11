@@ -1,0 +1,36 @@
+name: Apply RSM story scoping fix
+
+on:
+  push:
+    branches:
+      - fix/rsm-outcome-entity-financing
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/rsm-outcome-entity-financing
+
+      - name: Apply story scoping fix
+        run: python .github/apply_rsm_story_scope_fix.py
+
+      - name: Compile patched files
+        run: |
+          python -m py_compile process_city.py tests/test_rsm_sept9_regressions.py
+          git diff --check
+
+      - name: Commit scoped branch
+        run: |
+          rm .github/apply_rsm_story_scope_fix.py
+          rm .github/workflows/apply-rsm-story-scope-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add process_city.py tests/test_rsm_sept9_regressions.py .github/apply_rsm_story_scope_fix.py .github/workflows/apply-rsm-story-scope-fix.yml
+          git diff --cached --check
+          git commit -m "Scope RSM story financing guard locally"
+          git push origin HEAD:fix/rsm-outcome-entity-financing
