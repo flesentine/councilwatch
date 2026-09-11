@@ -273,7 +273,8 @@ def test_publishable_city_debt_wording_is_material_issue():
         headline="Council Considers St. Junipero Serra Catholic School Financing",
         dek="The public hearing concerned a tax-exempt loan.",
         body=[
-            "The City debt issuance would total up to $10 million."
+            "The City debt issuance for St. Junipero Serra Catholic "
+            "School would total up to $10 million."
         ],
         key_facts=[],
         verification_notes=[],

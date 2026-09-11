@@ -400,13 +400,22 @@ def unsupported_conduit_financing_story_issues(
             ):
                 continue
 
-            scoped_text = " ".join(
-                [
-                    str(story.headline or ""),
-                    str(story.dek or ""),
-                    value,
-                ]
-            )
+            if field == "headline":
+                scoped_text = value
+
+            elif field == "dek":
+                scoped_text = " ".join(
+                    [
+                        str(story.headline or ""),
+                        value,
+                    ]
+                )
+
+            else:
+                # Body paragraphs and key facts must identify the
+                # conduit-financing item locally. Do not inherit
+                # anchors from another topic in the headline/dek.
+                scoped_text = value
 
             matching_context = next(
                 (
