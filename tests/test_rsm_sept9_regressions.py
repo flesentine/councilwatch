@@ -74,7 +74,7 @@ def test_conduit_guard_respects_explicit_city_obligation():
         items=[
             mi.CoverageItem(
                 rank=1,
-                topic="Tax-Exempt Loan",
+                topic="Tax-Exempt Loan for St. Junipero Serra Catholic School",
                 score=9,
                 category="finance",
                 action_status="Approved",
@@ -99,7 +99,7 @@ def test_build_coverage_plan_applies_conduit_guard(monkeypatch):
         items=[
             mi.CoverageItem(
                 rank=1,
-                topic="Tax-Exempt Loan",
+                topic="Tax-Exempt Loan for St. Junipero Serra Catholic School",
                 score=9,
                 category="finance",
                 action_status="Discussed",
@@ -270,7 +270,7 @@ def test_unvalidated_unresolved_action_does_not_block_final_audit():
 
 def test_publishable_city_debt_wording_is_material_issue():
     story = StoryDraft(
-        headline="Council Considers School Financing",
+        headline="Council Considers St. Junipero Serra Catholic School Financing",
         dek="The public hearing concerned a tax-exempt loan.",
         body=[
             "The City debt issuance would total up to $10 million."
@@ -330,3 +330,147 @@ def test_explicit_city_obligation_allows_city_debt_wording():
         story,
         agenda,
     ) == []
+
+
+
+def test_conduit_guard_sanitizes_bad_coverage_topic():
+    plan = mi.CoveragePlan(
+        items=[
+            mi.CoverageItem(
+                rank=1,
+                topic=(
+                    "City Debt Issuance for St. Junipero Serra "
+                    "Catholic School"
+                ),
+                score=9,
+                category="finance",
+                action_status="Discussed",
+                summary="Council considered the financing.",
+                why_it_matters="The school financing required council review.",
+                must_include=True,
+            )
+        ]
+    )
+
+    assert mi._guard_conduit_financing_coverage_plan(
+        plan,
+        RSM_AGENDA,
+    )
+
+    assert "city debt" not in plan.items[0].topic.casefold()
+    assert "financing" in plan.items[0].topic.casefold()
+
+
+def test_conduit_guard_does_not_rewrite_unrelated_city_borrowing():
+    mixed_agenda = RSM_AGENDA + """
+
+7.1 APPROVAL OF CITY BORROWING FOR FIRE STATION IMPROVEMENTS
+RECOMMENDATION:
+Authorize City borrowing for the municipal fire station project.
+"""
+
+    conduit_item = mi.CoverageItem(
+        rank=1,
+        topic="City Debt Issuance for St. Junipero Serra Catholic School",
+        score=9,
+        category="finance",
+        action_status="Discussed",
+        summary="Public debt issuance within the city.",
+        why_it_matters="The school financing required council review.",
+        must_include=True,
+    )
+
+    city_item = mi.CoverageItem(
+        rank=2,
+        topic="Fire Station Improvements",
+        score=8,
+        category="finance",
+        action_status="Approved",
+        summary="City borrowing for fire station improvements.",
+        why_it_matters="The City borrowing would fund municipal work.",
+        must_include=True,
+    )
+
+    plan = mi.CoveragePlan(
+        items=[
+            conduit_item,
+            city_item,
+        ]
+    )
+
+    assert mi._guard_conduit_financing_coverage_plan(
+        plan,
+        mixed_agenda,
+    )
+
+    assert "city debt" not in conduit_item.topic.casefold()
+    assert city_item.summary == "City borrowing for fire station improvements."
+    assert city_item.why_it_matters == (
+        "The City borrowing would fund municipal work."
+    )
+
+
+def test_story_guard_ignores_unrelated_city_debt_item():
+    story = StoryDraft(
+        headline="Council Reviews School Financing and Fire Station Debt",
+        dek=(
+            "CEDA financing would benefit St. Junipero Serra Catholic School, "
+            "while a separate item concerned the fire station."
+        ),
+        body=[
+            "The City debt issuance would fund fire station improvements."
+        ],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    # The dangerous phrase is in a paragraph about an unrelated
+    # City project, so it must not be assigned to the conduit item.
+    # Requiring paragraph-level anchors avoids this false positive.
+    assert pc.unsupported_conduit_financing_story_issues(
+        story,
+        RSM_AGENDA,
+    ) == []
+
+
+def test_formal_intent_gate_covers_direct_accept_and_pass():
+    story = StoryDraft(
+        headline="Council Considers Formal Action",
+        dek="The final action remains unresolved.",
+        body=["The recording evidence only establishes discussion."],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    for agenda_title in (
+        "DIRECT STAFF TO PREPARE A CONTRACT AMENDMENT",
+        "ACCEPT THE ANNUAL FINANCIAL REPORT",
+        "PASS A MOTION AUTHORIZING THE PROJECT",
+    ):
+        intelligence = {
+            "coverage_items": [
+                {
+                    "rank": 1,
+                    "topic": "Annual Project Contract Report",
+                    "score": 9,
+                    "must_include": True,
+                }
+            ],
+            "action_ledger": [
+                {
+                    "topic": "Annual Project Contract Report",
+                    "item_number": "8.1",
+                    "agenda_section": "NEW BUSINESS",
+                    "agenda_title": agenda_title,
+                    "action_status": "discussed",
+                    "validated": True,
+                }
+            ],
+        }
+
+        issues = pc.unresolved_high_priority_formal_action_issues(
+            story,
+            intelligence,
+        )
+
+        assert len(issues) == 1, agenda_title

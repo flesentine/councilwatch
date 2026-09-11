@@ -24,6 +24,8 @@ from meeting_intelligence import (
     make_rich_story,
     make_comprehensive_source_notes,
     retry_api_call,
+    _conduit_financing_agenda_contexts,
+    _conduit_text_matches_context,
 )
 from notifications import notify_ready_for_review
 from settings import (
@@ -120,6 +122,9 @@ def unresolved_high_priority_formal_action_issues(
         r"authorize|authorization|authorized|"
         r"award|awarded|"
         r"appoint|appointment|appointed|"
+        r"direct|direction|directed|"
+        r"accept|acceptance|accepted|"
+        r"pass|passed|"
         r"deny|denial|denied|"
         r"reject|rejection|rejected"
         r")\b",
@@ -330,35 +335,21 @@ def unsupported_conduit_financing_story_issues(
     agenda,
 ):
     """
-    Fail closed when publishable copy assigns third-party conduit
-    financing debt/borrowing to the City without official support.
-
-    This does not rewrite prose. It creates a material audit issue
-    so the exact final copy must be corrected and re-audited.
+    Fail closed when publishable copy assigns a matched third-party
+    conduit-financing item to City debt/borrowing without official
+    support, while leaving unrelated City debt items alone.
     """
-    agenda_lower = str(
-        agenda or ""
-    ).casefold()
+    contexts = [
+        context
+        for context in _conduit_financing_agenda_contexts(
+            agenda
+        )
+        if not context.get(
+            "city_obligation"
+        )
+    ]
 
-    is_conduit_financing = (
-        "tax-exempt loan" in agenda_lower
-        and "development authority" in agenda_lower
-        and "benefit of" in agenda_lower
-    )
-
-    if not is_conduit_financing:
-        return []
-
-    explicit_city_obligation = re.search(
-        r"\bcity(?:\s+of\s+[a-z\s]+)?\s+"
-        r"(?:is|will\s+be|shall\s+be|acts\s+as)\s+"
-        r"(?:the\s+)?(?:borrower|obligor|debtor|guarantor)\b"
-        r"|\bcity(?:'s)?\s+"
-        r"(?:debt|borrowing|financial\s+obligation|liability)\b",
-        agenda_lower,
-    )
-
-    if explicit_city_obligation:
+    if not contexts:
         return []
 
     unsupported = re.compile(
@@ -409,6 +400,29 @@ def unsupported_conduit_financing_story_issues(
             ):
                 continue
 
+            scoped_text = " ".join(
+                [
+                    str(story.headline or ""),
+                    str(story.dek or ""),
+                    value,
+                ]
+            )
+
+            matching_context = next(
+                (
+                    context
+                    for context in contexts
+                    if _conduit_text_matches_context(
+                        scoped_text,
+                        context,
+                    )
+                ),
+                None,
+            )
+
+            if not matching_context:
+                continue
+
             key = (
                 field,
                 value,
@@ -419,18 +433,29 @@ def unsupported_conduit_financing_story_issues(
 
             seen.add(key)
 
+            item_number = matching_context.get(
+                "item_number",
+                "",
+            )
+
+            issue_label = (
+                f"Official agenda item {item_number}"
+                if item_number
+                else "The matched official agenda item"
+            )
+
             issues.append(
                 AuditIssue(
                     severity="material",
                     field=field,
                     draft_text=value,
                     source_evidence=(
-                        "The official material describes a "
-                        "tax-exempt loan issued by a separate "
-                        "development/financing authority for "
-                        "another beneficiary and does not "
-                        "establish the City as borrower, obligor, "
-                        "debtor, guarantor, or financially liable."
+                        f"{issue_label} describes a tax-exempt "
+                        "loan issued by a separate development/"
+                        "financing authority for another "
+                        "beneficiary and does not establish the "
+                        "City as borrower, obligor, debtor, "
+                        "guarantor, or financially liable."
                     ),
                     correction=(
                         "Describe the financing and the council's "

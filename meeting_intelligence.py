@@ -7131,41 +7131,208 @@ Return ONLY JSON:
     return cleaned
 
 
+_CONDUIT_GENERIC_TOKENS = {
+    "agenda",
+    "approval",
+    "approve",
+    "approved",
+    "authority",
+    "benefit",
+    "bond",
+    "bonds",
+    "borrowing",
+    "city",
+    "council",
+    "debt",
+    "development",
+    "exempt",
+    "finance",
+    "financing",
+    "issuance",
+    "issued",
+    "item",
+    "loan",
+    "municipal",
+    "public",
+    "resolution",
+    "tax",
+    "the",
+    "with",
+    "from",
+    "for",
+    "and",
+    "its",
+}
+
+
+_CITY_FINANCIAL_OBLIGATION_RE = re.compile(
+    r"\bcity(?:\s+of\s+[a-z]+(?:\s+[a-z]+){0,5})?\s+"
+    r"(?:is|will\s+be|shall\s+be|acts\s+as)\s+"
+    r"(?:the\s+)?(?:borrower|obligor|debtor|guarantor)\b"
+    r"|\bcity(?:'s)?\s+"
+    r"(?:debt|borrowing|financial\s+obligation|liability)\b",
+    re.I,
+)
+
+
+def _conduit_anchor_tokens(value):
+    return {
+        token
+        for token in re.findall(
+            r"[a-z0-9]+",
+            str(value or "").casefold(),
+        )
+        if len(token) >= 4
+        and token not in _CONDUIT_GENERIC_TOKENS
+    }
+
+
+def _agenda_item_source_block(
+    agenda,
+    item_number,
+):
+    """
+    Return the raw source block for one numbered agenda item.
+
+    This is used only to keep City-obligation evidence scoped to
+    the same conduit-financing item rather than the whole meeting.
+    """
+    agenda_text = str(
+        agenda or ""
+    )
+
+    item_number = str(
+        item_number or ""
+    ).strip()
+
+    if not item_number:
+        return ""
+
+    start_match = re.search(
+        rf"(?mi)^\s*{re.escape(item_number)}(?:\s+|$)",
+        agenda_text,
+    )
+
+    if not start_match:
+        return ""
+
+    next_match = re.search(
+        r"(?mi)^\s*(?:\d+(?:\.\d+)+|\d+\.)(?:\s+|$)",
+        agenda_text[start_match.end():],
+    )
+
+    if next_match:
+        end_index = (
+            start_match.end()
+            + next_match.start()
+        )
+    else:
+        end_index = len(
+            agenda_text
+        )
+
+    return agenda_text[
+        start_match.start():end_index
+    ]
+
+
+def _conduit_financing_agenda_contexts(
+    agenda,
+):
+    """
+    Identify individual official agenda items that are clearly
+    third-party conduit financing, preserving per-item scope.
+    """
+    contexts = []
+
+    for agenda_item in parse_agenda_structure(
+        agenda
+    ):
+        title = str(
+            agenda_item.get(
+                "title",
+                "",
+            )
+        ).strip()
+
+        title_lower = title.casefold()
+
+        if not (
+            "tax-exempt loan" in title_lower
+            and "development authority" in title_lower
+            and "benefit of" in title_lower
+        ):
+            continue
+
+        anchors = _conduit_anchor_tokens(
+            title
+        )
+
+        if len(anchors) < 2:
+            continue
+
+        source_block = _agenda_item_source_block(
+            agenda,
+            agenda_item.get(
+                "item_number",
+                "",
+            ),
+        )
+
+        contexts.append(
+            {
+                "item_number": str(
+                    agenda_item.get(
+                        "item_number",
+                        "",
+                    )
+                    or ""
+                ),
+                "title": title,
+                "anchors": anchors,
+                "source_block": source_block,
+                "city_obligation": bool(
+                    _CITY_FINANCIAL_OBLIGATION_RE.search(
+                        source_block
+                    )
+                ),
+            }
+        )
+
+    return contexts
+
+
+def _conduit_text_matches_context(
+    value,
+    context,
+):
+    return len(
+        _conduit_anchor_tokens(
+            value
+        )
+        & set(
+            context.get(
+                "anchors",
+                set(),
+            )
+        )
+    ) >= 2
+
+
 def _guard_conduit_financing_coverage_plan(
     plan,
     agenda,
 ):
     """
-    Prevent editorial-ranking language from turning third-party
-    conduit financing into City debt.
-
-    Approval of financing issued by a separate authority for
-    another beneficiary does not itself make the municipality the
-    borrower, obligor, debtor, or guarantor.
+    Prevent one specific third-party conduit-financing item from
+    being characterized as City debt without changing unrelated
+    City borrowing/debt items elsewhere in the meeting.
     """
-    agenda_lower = str(
-        agenda or ""
-    ).casefold()
-
-    is_conduit_financing = (
-        "tax-exempt loan" in agenda_lower
-        and "development authority" in agenda_lower
-        and "benefit of" in agenda_lower
+    contexts = _conduit_financing_agenda_contexts(
+        agenda
     )
 
-    if not is_conduit_financing:
-        return False
-
-    explicit_city_obligation = re.search(
-        r"\bcity(?:\s+of\s+[a-z\s]+)?\s+"
-        r"(?:is|will\s+be|shall\s+be|acts\s+as)\s+"
-        r"(?:the\s+)?(?:borrower|obligor|debtor|guarantor)\b"
-        r"|\bcity(?:'s)?\s+"
-        r"(?:debt|borrowing|financial\s+obligation|liability)\b",
-        agenda_lower,
-    )
-
-    if explicit_city_obligation:
+    if not contexts:
         return False
 
     replacements = (
@@ -7179,7 +7346,7 @@ def _guard_conduit_financing_coverage_plan(
         ),
         (
             re.compile(
-                r"\bmunicipal\s+debt\s+issuance\b",
+                r"\bmunicipal\s+debt(?:\s+issuance)?\b",
                 re.I,
             ),
             "third-party tax-exempt financing",
@@ -7216,20 +7383,30 @@ def _guard_conduit_financing_coverage_plan(
                 str(item.summary or ""),
                 str(item.why_it_matters or ""),
             ]
-        ).casefold()
+        )
 
-        if not any(
-            marker in item_context
-            for marker in (
-                "loan",
-                "financ",
-                "bond",
-                "debt",
+        matching_context = next(
+            (
+                context
+                for context in contexts
+                if _conduit_text_matches_context(
+                    item_context,
+                    context,
+                )
+            ),
+            None,
+        )
+
+        if (
+            not matching_context
+            or matching_context.get(
+                "city_obligation"
             )
         ):
             continue
 
         for field in (
+            "topic",
             "summary",
             "why_it_matters",
         ):
@@ -7249,8 +7426,21 @@ def _guard_conduit_financing_coverage_plan(
                     cleaned,
                 )
 
+            if (
+                field == "topic"
+                and cleaned
+            ):
+                cleaned = (
+                    cleaned[0].upper()
+                    + cleaned[1:]
+                )
+
             if cleaned != value:
-                setattr(item, field, cleaned)
+                setattr(
+                    item,
+                    field,
+                    cleaned,
+                )
                 changed = True
 
     return changed
