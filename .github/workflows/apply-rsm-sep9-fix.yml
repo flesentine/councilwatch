@@ -1,0 +1,1049 @@
+name: Apply RSM September 9 guard fixes
+
+on:
+  push:
+    branches:
+      - fix/rsm-outcome-entity-financing
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/rsm-outcome-entity-financing
+
+      - name: Apply narrow production and regression fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          mi_path = Path("meeting_intelligence.py")
+          mi = mi_path.read_text(encoding="utf-8")
+
+          old_requirements = '''    Requirements:
+                - observed surname belongs to a role-labeled transcript form
+                - same first letter
+                - same surname length
+                - at least four characters
+                - no more than two character substitutions
+                - identical Soundex key
+          '''
+          new_requirements = '''    Requirements:
+                - observed surname belongs to a role-labeled transcript form
+                - same first letter
+                - surname lengths differ by no more than two characters
+                - at least four characters
+                - bounded edit distance no greater than three
+                - identical Soundex key
+          '''
+
+          # Match the real source indentation rather than trusting this comment block's display.
+          old_requirements = old_requirements.replace("                -", "      -")
+          new_requirements = new_requirements.replace("                -", "      -")
+          assert mi.count(old_requirements) == 1, "role correction requirements block drifted"
+          mi = mi.replace(old_requirements, new_requirements, 1)
+
+          old_role_logic = '''    if (
+                len(
+                    observed_name
+                )
+                != len(
+                    canonical_name
+                )
+            ):
+                return False
+
+            if (
+                observed_name[0]
+                != canonical_name[0]
+            ):
+                return False
+
+            differing_positions = sum(
+                left != right
+                for left, right
+                in zip(
+                    observed_name,
+                    canonical_name,
+                )
+            )
+
+            if differing_positions > 2:
+                return False
+          '''
+          old_role_logic = old_role_logic.replace("            ", "    ", 1)
+          # The previous normalization only fixes the first line; use the exact source block below.
+          old_role_logic = '''    if (
+                len(
+                    observed_name
+                )
+                != len(
+                    canonical_name
+                )
+            ):
+                return False
+
+            if (
+                observed_name[0]
+                != canonical_name[0]
+            ):
+                return False
+
+            differing_positions = sum(
+                left != right
+                for left, right
+                in zip(
+                    observed_name,
+                    canonical_name,
+                )
+            )
+
+            if differing_positions > 2:
+                return False
+          '''.replace("            )", "    )").replace("            if", "    if").replace("            differing", "    differing").replace("            return", "        return").replace("                ", "        ")
+
+          # Build from exact text to avoid indentation ambiguity.
+          old_role_logic = '''    if (
+        len(
+            observed_name
+        )
+        != len(
+            canonical_name
+        )
+    ):
+        return False
+
+    if (
+        observed_name[0]
+        != canonical_name[0]
+    ):
+        return False
+
+    differing_positions = sum(
+        left != right
+        for left, right
+        in zip(
+            observed_name,
+            canonical_name,
+        )
+    )
+
+    if differing_positions > 2:
+        return False
+'''
+          new_role_logic = '''    if (
+        abs(
+            len(observed_name)
+            - len(canonical_name)
+        )
+        > 2
+    ):
+        return False
+
+    if (
+        observed_name[0]
+        != canonical_name[0]
+    ):
+        return False
+
+    def bounded_edit_distance(
+        left,
+        right,
+        limit=3,
+    ):
+        previous = list(
+            range(
+                len(right) + 1
+            )
+        )
+
+        for row_index, left_char in enumerate(
+            left,
+            start=1,
+        ):
+            current = [row_index]
+
+            for column_index, right_char in enumerate(
+                right,
+                start=1,
+            ):
+                current.append(
+                    min(
+                        previous[column_index] + 1,
+                        current[column_index - 1] + 1,
+                        previous[column_index - 1]
+                        + (left_char != right_char),
+                    )
+                )
+
+            if min(current) > limit:
+                return limit + 1
+
+            previous = current
+
+        return previous[-1]
+
+    if (
+        bounded_edit_distance(
+            observed_name,
+            canonical_name,
+        )
+        > 3
+    ):
+        return False
+'''
+          assert mi.count(old_role_logic) == 1, "role correction logic drifted"
+          mi = mi.replace(old_role_logic, new_role_logic, 1)
+
+          conduit_helper = '''
+
+def _guard_conduit_financing_coverage_plan(
+    plan,
+    agenda,
+):
+    """
+    Prevent editorial-ranking language from turning third-party
+    conduit financing into City debt.
+
+    The agenda can establish that a separate development or
+    financing authority is issuing a tax-exempt loan for the
+    benefit of another entity. That does not, by itself, make the
+    municipality the borrower, obligor, debtor, or guarantor.
+    """
+    agenda_text = str(
+        agenda or ""
+    )
+
+    agenda_lower = agenda_text.casefold()
+
+    is_conduit_financing = (
+        "tax-exempt loan" in agenda_lower
+        and "development authority" in agenda_lower
+        and "benefit of" in agenda_lower
+    )
+
+    if not is_conduit_financing:
+        return False
+
+    explicit_city_obligation = re.search(
+        r"\bcity(?:\s+of\s+[a-z\s]+)?\s+"
+        r"(?:is|will\s+be|shall\s+be|acts\s+as)\s+"
+        r"(?:the\s+)?(?:borrower|obligor|debtor|guarantor)\b"
+        r"|\bcity(?:'s)?\s+"
+        r"(?:debt|borrowing|financial\s+obligation|liability)\b",
+        agenda_lower,
+    )
+
+    if explicit_city_obligation:
+        return False
+
+    replacements = (
+        (
+            re.compile(
+                r"\bpublic\s+debt\s+issuance"
+                r"(?:\s+within\s+the\s+city)?\b",
+                re.I,
+            ),
+            "third-party tax-exempt financing",
+        ),
+        (
+            re.compile(
+                r"\bmunicipal\s+debt\s+issuance\b",
+                re.I,
+            ),
+            "third-party tax-exempt financing",
+        ),
+        (
+            re.compile(
+                r"\bcity\s+debt(?:\s+issuance)?\b",
+                re.I,
+            ),
+            "the financing",
+        ),
+        (
+            re.compile(
+                r"\bcity\s+borrowing\b",
+                re.I,
+            ),
+            "the financing",
+        ),
+        (
+            re.compile(
+                r"\bdebt\s+issued\s+by\s+the\s+city\b",
+                re.I,
+            ),
+            "the financing approved by the council",
+        ),
+    )
+
+    changed = False
+
+    for item in plan.items:
+        item_context = " ".join(
+            [
+                str(item.topic or ""),
+                str(item.summary or ""),
+                str(item.why_it_matters or ""),
+            ]
+        ).casefold()
+
+        if not any(
+            marker in item_context
+            for marker in (
+                "loan",
+                "financ",
+                "bond",
+                "debt",
+            )
+        ):
+            continue
+
+        for field in (
+            "summary",
+            "why_it_matters",
+        ):
+            value = str(
+                getattr(
+                    item,
+                    field,
+                    "",
+                )
+                or ""
+            )
+
+            cleaned = value
+
+            for pattern, replacement in replacements:
+                cleaned = pattern.sub(
+                    replacement,
+                    cleaned,
+                )
+
+            if cleaned != value:
+                setattr(
+                    item,
+                    field,
+                    cleaned,
+                )
+                changed = True
+
+    return changed
+'''
+
+          marker = '\n\ndef build_coverage_plan(\n'
+          assert mi.count(marker) == 1, "build_coverage_plan marker drifted"
+          mi = mi.replace(marker, conduit_helper + marker, 1)
+
+          prompt_marker = '''The summary and why_it_matters fields must NOT introduce new
+facts or consequences. They are editorial ranking aids only.
+
+Do not say an action:
+'''
+          prompt_replacement = '''The summary and why_it_matters fields must NOT introduce new
+facts or consequences. They are editorial ranking aids only.
+
+CONDUIT-FINANCING RULE:
+When a separate development/financing authority is issuing a
+loan or bonds for another beneficiary, do NOT describe that as
+City debt, City borrowing, municipal debt, or public debt issued
+by the City unless the supplied official material explicitly says
+the City is the borrower, obligor, debtor, guarantor, or otherwise
+financially liable. Describe the council's approval role precisely.
+
+Do not say an action:
+'''
+          assert mi.count(prompt_marker) == 1, "coverage prompt marker drifted"
+          mi = mi.replace(prompt_marker, prompt_replacement, 1)
+
+          return_marker = '''    return plan.model_dump()
+
+
+def build_meeting_intelligence(
+'''
+          return_replacement = '''    _guard_conduit_financing_coverage_plan(
+        plan,
+        agenda,
+    )
+
+    return plan.model_dump()
+
+
+def build_meeting_intelligence(
+'''
+          assert mi.count(return_marker) == 1, "coverage-plan return marker drifted"
+          mi = mi.replace(return_marker, return_replacement, 1)
+
+          rich_marker = '''- Include important dollar amounts when supported.
+- Preserve the EXACT scope of contracts and approvals.
+'''
+          rich_replacement = '''- Include important dollar amounts when supported.
+- When a separate development/financing authority is issuing a
+  loan or bonds for another beneficiary, do NOT call it City debt,
+  City borrowing, municipal debt, or public debt issued by the City
+  unless the evidence explicitly says the City is the borrower,
+  obligor, debtor, guarantor, or otherwise financially liable.
+- Preserve the EXACT scope of contracts and approvals.
+'''
+          assert mi.count(rich_marker) == 1, "rich-story prompt marker drifted"
+          mi = mi.replace(rich_marker, rich_replacement, 1)
+
+          enforcement_marker = '''18. Do not describe historical planning decisions as promises,
+    commitments or obligations unless the evidence explicitly
+    says that.
+
+================ COVERAGE PLAN ================
+'''
+          enforcement_replacement = '''18. Do not describe historical planning decisions as promises,
+    commitments or obligations unless the evidence explicitly
+    says that.
+
+19. Do not characterize financing issued by a separate authority
+    for another beneficiary as City debt, City borrowing,
+    municipal debt, or public debt issued by the City unless the
+    evidence explicitly makes the City the borrower, obligor,
+    debtor, guarantor, or otherwise financially liable.
+
+================ COVERAGE PLAN ================
+'''
+          assert mi.count(enforcement_marker) == 1, "enforcement prompt marker drifted"
+          mi = mi.replace(enforcement_marker, enforcement_replacement, 1)
+
+          depth_marker = '''- Clearly distinguish council action from discussion only.
+- Use ONLY the evidence supplied below.
+'''
+          depth_replacement = '''- Clearly distinguish council action from discussion only.
+- Do not turn third-party conduit financing into City debt or
+  City borrowing unless the evidence explicitly makes the City
+  the borrower, obligor, debtor, guarantor, or financially liable.
+- Use ONLY the evidence supplied below.
+'''
+          assert mi.count(depth_marker) == 1, "depth prompt marker drifted"
+          mi = mi.replace(depth_marker, depth_replacement, 1)
+
+          mi_path.write_text(mi, encoding="utf-8")
+
+          pc_path = Path("process_city.py")
+          pc = pc_path.read_text(encoding="utf-8")
+
+          import_marker = '''from gemini_worker import (
+    make_source_notes,
+    make_story,
+    audit_story,
+)
+'''
+          import_replacement = '''from gemini_worker import (
+    AuditIssue,
+    make_source_notes,
+    make_story,
+    audit_story,
+)
+'''
+          assert pc.count(import_marker) == 1, "gemini_worker import marker drifted"
+          pc = pc.replace(import_marker, import_replacement, 1)
+
+          action_guard_helper = '''
+
+def unresolved_high_priority_formal_action_issues(
+    story,
+    intelligence,
+):
+    """
+    Fail closed when a high-priority formal-action agenda item has
+    no verified final disposition.
+
+    An agenda recommendation to approve/adopt/authorize is not
+    evidence that the council actually did so. But when that item
+    is the lead or another high-priority MUST INCLUDE topic, a
+    final audit may not pass while the validated action ledger is
+    still only Discussed, Considered, Unclear, or otherwise
+    unresolved.
+    """
+    coverage_items = [
+        item
+        for item in intelligence.get(
+            "coverage_items",
+            [],
+        )
+        if (
+            item.get("must_include")
+            and (
+                int(item.get("rank") or 999) == 1
+                or int(item.get("score") or 0) >= 8
+            )
+        )
+    ]
+
+    if not coverage_items:
+        return []
+
+    formal_intent = re.compile(
+        r"\b(?:"
+        r"approval|approve|approved|"
+        r"adopt|adoption|adopted|"
+        r"authorize|authorization|authorized|"
+        r"award|awarded|"
+        r"appoint|appointment|appointed|"
+        r"deny|denial|denied|"
+        r"reject|rejection|rejected"
+        r")\b",
+        re.I,
+    )
+
+    unresolved_statuses = {
+        "unclear",
+        "unknown",
+        "discussed",
+        "considered",
+        "reviewed",
+        "no council action",
+        "no action",
+    }
+
+    stopwords = {
+        "agenda",
+        "approval",
+        "approve",
+        "approved",
+        "city",
+        "council",
+        "item",
+        "public",
+        "resolution",
+        "the",
+        "with",
+        "from",
+        "for",
+    }
+
+    def tokens(value):
+        return {
+            token
+            for token in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").casefold(),
+            )
+            if len(token) >= 4
+            and token not in stopwords
+        }
+
+    ledger = intelligence.get(
+        "action_ledger",
+        [],
+    )
+
+    issues = []
+
+    for coverage in coverage_items:
+        coverage_topic = str(
+            coverage.get(
+                "topic",
+                "",
+            )
+        ).strip()
+
+        coverage_tokens = tokens(
+            coverage_topic
+        )
+
+        if len(coverage_tokens) < 2:
+            continue
+
+        candidates = []
+
+        for action in ledger:
+            action_status = str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+
+            if action_status in ACTION_FORMAL_STATUSES:
+                continue
+
+            if action_status not in unresolved_statuses:
+                continue
+
+            section = str(
+                action.get(
+                    "agenda_section",
+                    "",
+                )
+            ).strip().upper()
+
+            if section == "CONSENT CALENDAR":
+                continue
+
+            agenda_title = str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+            ).strip()
+
+            if not formal_intent.search(
+                agenda_title
+            ):
+                continue
+
+            action_tokens = tokens(
+                str(
+                    action.get(
+                        "topic",
+                        "",
+                    )
+                )
+                + " "
+                + agenda_title
+            )
+
+            overlap = len(
+                coverage_tokens
+                & action_tokens
+            )
+
+            if overlap < 2:
+                continue
+
+            candidates.append(
+                (
+                    overlap,
+                    action,
+                )
+            )
+
+        if not candidates:
+            continue
+
+        candidates.sort(
+            key=lambda entry: entry[0],
+            reverse=True,
+        )
+
+        action = candidates[0][1]
+
+        item_number = str(
+            action.get(
+                "item_number",
+                "",
+            )
+        ).strip()
+
+        agenda_title = str(
+            action.get(
+                "agenda_title",
+                "",
+            )
+        ).strip()
+
+        action_status = str(
+            action.get(
+                "action_status",
+                "unclear",
+            )
+        ).strip().lower()
+
+        field = "headline"
+        draft_text = str(
+            story.headline or ""
+        ).strip()
+
+        if not draft_text:
+            field = "dek"
+            draft_text = str(
+                story.dek or ""
+            ).strip()
+
+        if not draft_text and story.body:
+            field = "body"
+            draft_text = str(
+                story.body[0] or ""
+            ).strip()
+
+        if not draft_text:
+            continue
+
+        item_label = (
+            f"Agenda item {item_number}"
+            if item_number
+            else "The official agenda item"
+        )
+
+        issues.append(
+            AuditIssue(
+                severity="material",
+                field=field,
+                draft_text=draft_text,
+                source_evidence=(
+                    f"{item_label} calls for formal action "
+                    f"({agenda_title}), but CouncilWatch's "
+                    "source-validated action ledger only "
+                    f"establishes '{action_status}'. The final "
+                    "council disposition is unresolved."
+                ),
+                correction=(
+                    "Verify the same item's motion/vote from the "
+                    "recording or another official result source. "
+                    "Do not infer approval or adoption from the "
+                    "agenda recommendation alone."
+                ),
+            )
+        )
+
+    return issues
+'''
+
+          status_marker = '\n\ndef strip_public_agenda_item_numbers(story):\n'
+          assert pc.count(status_marker) == 1, "process helper insertion marker drifted"
+          pc = pc.replace(status_marker, action_guard_helper + status_marker, 1)
+
+          final_ok_marker = '''        final_ok = len(material) == 0
+
+        # --------------------------------------------------
+        # SAVE
+'''
+          final_ok_replacement = '''        deterministic_action_issues = (
+            unresolved_high_priority_formal_action_issues(
+                story,
+                intelligence,
+            )
+        )
+
+        if deterministic_action_issues:
+            existing_issue_keys = {
+                (
+                    issue.field,
+                    issue.draft_text,
+                    issue.source_evidence,
+                )
+                for issue in valid_issues
+            }
+
+            for issue in deterministic_action_issues:
+                key = (
+                    issue.field,
+                    issue.draft_text,
+                    issue.source_evidence,
+                )
+
+                if key not in existing_issue_keys:
+                    valid_issues.append(
+                        issue
+                    )
+                    existing_issue_keys.add(
+                        key
+                    )
+
+            material = [
+                issue
+                for issue in valid_issues
+                if issue.severity.lower()
+                == "material"
+            ]
+
+        final_ok = len(material) == 0
+
+        # --------------------------------------------------
+        # SAVE
+'''
+          assert pc.count(final_ok_marker) == 1, "final audit marker drifted"
+          pc = pc.replace(final_ok_marker, final_ok_replacement, 1)
+
+          pc_path.write_text(pc, encoding="utf-8")
+
+          tests = Path("tests/test_rsm_sept9_regressions.py")
+          tests.write_text(r'''from types import SimpleNamespace
+
+import meeting_intelligence as mi
+import process_city as pc
+from gemini_worker import StoryDraft
+
+
+RSM_AGENDA = """
+ROLL CALL OF CITY COUNCIL MEMBERS:
+Baert, Keri Lynn, Council Member
+
+6. PUBLIC HEARING ITEMS
+6.1 PUBLIC HEARING AND APPROVAL OF A RESOLUTION APPROVING THE ISSUANCE BY THE CALIFORNIA ENTERPRISE DEVELOPMENT AUTHORITY (CEDA) OF A TAX-EXEMPT LOAN FOR THE BENEFIT OF ST. JUNIPERO SERRA CATHOLIC SCHOOL AND THE ROMAN CATHOLIC BISHOP OF ORANGE
+RECOMMENDATION:
+Adopt a Resolution approving the issuance by the California Enterprise Development Authority of its tax-exempt loan in an aggregate principal amount not to exceed $10,000,000 for the benefit of St. Junipero Serra Catholic School and the Roman Catholic Bishop of Orange.
+"""
+
+
+def test_role_labeled_barrett_can_correct_to_official_baert():
+    role_candidates = [
+        "Councilmember Barrett",
+    ]
+
+    assert mi._role_labeled_person_correction_plausible(
+        "Councilmember Barrett",
+        "Keri Lynn Baert",
+        role_candidates,
+    )
+
+    # Preserve the earlier Laguna safety boundary: unrelated
+    # role-labeled surnames must not become a real official just
+    # because that person exists in an official directory.
+    assert not mi._role_labeled_person_correction_plausible(
+        "Councilmember Ordona",
+        "Kevin O'Connor",
+        ["Councilmember Ordona"],
+    )
+
+    # The special path never applies without a transcript role label.
+    assert not mi._role_labeled_person_correction_plausible(
+        "Barrett",
+        "Keri Lynn Baert",
+        [],
+    )
+
+
+def test_conduit_financing_coverage_language_is_not_city_debt():
+    plan = mi.CoveragePlan(
+        items=[
+            mi.CoverageItem(
+                rank=1,
+                topic=(
+                    "Tax-Exempt Loan for St. Junipero Serra "
+                    "Catholic School"
+                ),
+                score=9,
+                category="finance",
+                action_status="Discussed",
+                summary=(
+                    "Council considered the CEDA tax-exempt loan."
+                ),
+                why_it_matters=(
+                    "This involves a significant financial transaction "
+                    "and public debt issuance within the city, requiring "
+                    "formal council oversight and approval."
+                ),
+                must_include=True,
+            )
+        ]
+    )
+
+    assert mi._guard_conduit_financing_coverage_plan(
+        plan,
+        RSM_AGENDA,
+    )
+
+    why = plan.items[0].why_it_matters
+    assert "public debt" not in why.casefold()
+    assert "city debt" not in why.casefold()
+    assert "third-party tax-exempt financing" in why.casefold()
+
+
+def test_conduit_guard_does_not_override_explicit_city_obligation():
+    plan = mi.CoveragePlan(
+        items=[
+            mi.CoverageItem(
+                rank=1,
+                topic="Tax-Exempt Loan",
+                score=9,
+                category="finance",
+                action_status="Approved",
+                summary="The City debt issuance was approved.",
+                why_it_matters="The City debt affects municipal finances.",
+                must_include=True,
+            )
+        ]
+    )
+
+    agenda = (
+        RSM_AGENDA
+        + "\nThe City is the borrower and obligor for this financing."
+    )
+
+    assert not mi._guard_conduit_financing_coverage_plan(
+        plan,
+        agenda,
+    )
+    assert "City debt" in plan.items[0].why_it_matters
+
+
+def test_build_coverage_plan_applies_conduit_guard(monkeypatch):
+    parsed = mi.CoveragePlan(
+        items=[
+            mi.CoverageItem(
+                rank=1,
+                topic="Tax-Exempt Loan",
+                score=9,
+                category="finance",
+                action_status="Discussed",
+                summary="Public debt issuance within the city.",
+                why_it_matters="City borrowing requires oversight.",
+                must_include=True,
+            )
+        ]
+    )
+
+    class FakeModels:
+        def generate_content(self, **kwargs):
+            return SimpleNamespace(
+                parsed=parsed,
+                text="",
+            )
+
+    monkeypatch.setattr(
+        mi.genai,
+        "Client",
+        lambda: SimpleNamespace(
+            models=FakeModels(),
+        ),
+    )
+
+    monkeypatch.setattr(
+        mi,
+        "retry_api_call",
+        lambda _label, callback: callback(),
+    )
+
+    result = mi.build_coverage_plan(
+        {
+            "city_name": "Rancho Santa Margarita",
+            "meeting_date": "2026-09-09",
+        },
+        "Council held the public hearing.",
+        RSM_AGENDA,
+        [],
+    )
+
+    item = result["items"][0]
+    assert "public debt" not in item["summary"].casefold()
+    assert "city borrowing" not in item["why_it_matters"].casefold()
+
+
+def _rsm_intelligence(status):
+    return {
+        "coverage_items": [
+            {
+                "rank": 1,
+                "topic": (
+                    "Tax-Exempt Loan for St. Junipero Serra "
+                    "Catholic School"
+                ),
+                "score": 9,
+                "category": "finance",
+                "action_status": status,
+                "summary": "Council held a public hearing.",
+                "why_it_matters": "Formal council action was scheduled.",
+                "must_include": True,
+            }
+        ],
+        "action_ledger": [
+            {
+                "topic": (
+                    "Tax-Exempt Loan for St. Junipero Serra "
+                    "Catholic School"
+                ),
+                "item_number": "6.1",
+                "agenda_section": "PUBLIC HEARINGS",
+                "agenda_title": (
+                    "PUBLIC HEARING AND APPROVAL OF A RESOLUTION "
+                    "APPROVING THE ISSUANCE BY THE CALIFORNIA "
+                    "ENTERPRISE DEVELOPMENT AUTHORITY OF A TAX-EXEMPT "
+                    "LOAN FOR THE BENEFIT OF ST. JUNIPERO SERRA "
+                    "CATHOLIC SCHOOL"
+                ),
+                "action_status": status,
+                "validated": True,
+                "evidence_quote": "Council held the public hearing.",
+            }
+        ],
+    }
+
+
+def test_unresolved_lead_formal_action_blocks_green_audit():
+    story = StoryDraft(
+        headline=(
+            "City Council Considers Tax-Exempt Loan for "
+            "St. Junipero Serra Catholic School"
+        ),
+        dek="Council held a public hearing on the financing.",
+        body=["The final vote was not established by the evidence."],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    issues = pc.unresolved_high_priority_formal_action_issues(
+        story,
+        _rsm_intelligence("discussed"),
+    )
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.severity == "material"
+    assert issue.field == "headline"
+    assert "Agenda item 6.1" in issue.source_evidence
+    assert "final council disposition is unresolved" in issue.source_evidence
+    assert "Do not infer approval or adoption" in issue.correction
+
+
+def test_verified_formal_outcome_does_not_trigger_unresolved_gate():
+    story = StoryDraft(
+        headline="Council Adopts Tax-Exempt Loan Resolution",
+        dek="The council adopted the resolution.",
+        body=["The motion passed."],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    assert pc.unresolved_high_priority_formal_action_issues(
+        story,
+        _rsm_intelligence("adopted"),
+    ) == []
+
+
+def test_informational_discussion_without_formal_agenda_intent_is_allowed():
+    story = StoryDraft(
+        headline="Council Reviews Vector Control Report",
+        dek="The council discussed the report.",
+        body=["No formal action was scheduled."],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    intelligence = {
+        "coverage_items": [
+            {
+                "rank": 1,
+                "topic": "Mosquito and Vector Control District Report",
+                "score": 8,
+                "must_include": True,
+            }
+        ],
+        "action_ledger": [
+            {
+                "topic": "Mosquito and Vector Control District Report",
+                "item_number": "5.7",
+                "agenda_section": "ITEMS REMOVED FROM THE CONSENT CALENDAR",
+                "agenda_title": "CITY REPRESENTATIVE REPORT FOR THE ORANGE COUNTY MOSQUITO AND VECTOR CONTROL DISTRICT",
+                "action_status": "discussed",
+                "validated": True,
+            }
+        ],
+    }
+
+    assert pc.unresolved_high_priority_formal_action_issues(
+        story,
+        intelligence,
+    ) == []
+''', encoding="utf-8")
+          PY
+
+          python -m py_compile meeting_intelligence.py process_city.py tests/test_rsm_sept9_regressions.py
+          git diff --check
+
+          rm .github/workflows/apply-rsm-sep9-fix.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add meeting_intelligence.py process_city.py tests/test_rsm_sept9_regressions.py .github/workflows/apply-rsm-sep9-fix.yml
+          git diff --cached --check
+          git commit -m "Harden RSM outcome and entity verification"
+          git push origin HEAD:fix/rsm-outcome-entity-financing
