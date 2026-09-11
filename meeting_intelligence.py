@@ -6442,9 +6442,9 @@ def _role_labeled_person_correction_plausible(
     Requirements:
       - observed surname belongs to a role-labeled transcript form
       - same first letter
-      - same surname length
+      - surname lengths differ by no more than two characters
       - at least four characters
-      - no more than two character substitutions
+      - bounded edit distance no greater than three
       - identical Soundex key
 
     Exact canonical official-source support is still required later
@@ -6491,12 +6491,11 @@ def _role_labeled_person_correction_plausible(
         return False
 
     if (
-        len(
-            observed_name
+        abs(
+            len(observed_name)
+            - len(canonical_name)
         )
-        != len(
-            canonical_name
-        )
+        > 2
     ):
         return False
 
@@ -6506,16 +6505,46 @@ def _role_labeled_person_correction_plausible(
     ):
         return False
 
-    differing_positions = sum(
-        left != right
-        for left, right
-        in zip(
+    def bounded_edit_distance(
+        left,
+        right,
+        limit=3,
+    ):
+        previous = list(range(len(right) + 1))
+
+        for row_index, left_char in enumerate(
+            left,
+            start=1,
+        ):
+            current = [row_index]
+
+            for column_index, right_char in enumerate(
+                right,
+                start=1,
+            ):
+                current.append(
+                    min(
+                        previous[column_index] + 1,
+                        current[column_index - 1] + 1,
+                        previous[column_index - 1]
+                        + (left_char != right_char),
+                    )
+                )
+
+            if min(current) > limit:
+                return limit + 1
+
+            previous = current
+
+        return previous[-1]
+
+    if (
+        bounded_edit_distance(
             observed_name,
             canonical_name,
         )
-    )
-
-    if differing_positions > 2:
+        > 3
+    ):
         return False
 
     observed_soundex = _person_soundex(
@@ -7102,6 +7131,131 @@ Return ONLY JSON:
     return cleaned
 
 
+def _guard_conduit_financing_coverage_plan(
+    plan,
+    agenda,
+):
+    """
+    Prevent editorial-ranking language from turning third-party
+    conduit financing into City debt.
+
+    Approval of financing issued by a separate authority for
+    another beneficiary does not itself make the municipality the
+    borrower, obligor, debtor, or guarantor.
+    """
+    agenda_lower = str(
+        agenda or ""
+    ).casefold()
+
+    is_conduit_financing = (
+        "tax-exempt loan" in agenda_lower
+        and "development authority" in agenda_lower
+        and "benefit of" in agenda_lower
+    )
+
+    if not is_conduit_financing:
+        return False
+
+    explicit_city_obligation = re.search(
+        r"\bcity(?:\s+of\s+[a-z\s]+)?\s+"
+        r"(?:is|will\s+be|shall\s+be|acts\s+as)\s+"
+        r"(?:the\s+)?(?:borrower|obligor|debtor|guarantor)\b"
+        r"|\bcity(?:'s)?\s+"
+        r"(?:debt|borrowing|financial\s+obligation|liability)\b",
+        agenda_lower,
+    )
+
+    if explicit_city_obligation:
+        return False
+
+    replacements = (
+        (
+            re.compile(
+                r"\bpublic\s+debt\s+issuance"
+                r"(?:\s+within\s+the\s+city)?\b",
+                re.I,
+            ),
+            "third-party tax-exempt financing",
+        ),
+        (
+            re.compile(
+                r"\bmunicipal\s+debt\s+issuance\b",
+                re.I,
+            ),
+            "third-party tax-exempt financing",
+        ),
+        (
+            re.compile(
+                r"\bcity\s+debt(?:\s+issuance)?\b",
+                re.I,
+            ),
+            "the financing",
+        ),
+        (
+            re.compile(
+                r"\bcity\s+borrowing\b",
+                re.I,
+            ),
+            "the financing",
+        ),
+        (
+            re.compile(
+                r"\bdebt\s+issued\s+by\s+the\s+city\b",
+                re.I,
+            ),
+            "the financing approved by the council",
+        ),
+    )
+
+    changed = False
+
+    for item in plan.items:
+        item_context = " ".join(
+            [
+                str(item.topic or ""),
+                str(item.summary or ""),
+                str(item.why_it_matters or ""),
+            ]
+        ).casefold()
+
+        if not any(
+            marker in item_context
+            for marker in (
+                "loan",
+                "financ",
+                "bond",
+                "debt",
+            )
+        ):
+            continue
+
+        for field in (
+            "summary",
+            "why_it_matters",
+        ):
+            value = str(
+                getattr(
+                    item,
+                    field,
+                    "",
+                )
+                or ""
+            )
+            cleaned = value
+
+            for pattern, replacement in replacements:
+                cleaned = pattern.sub(
+                    replacement,
+                    cleaned,
+                )
+
+            if cleaned != value:
+                setattr(item, field, cleaned)
+                changed = True
+
+    return changed
+
+
 def build_coverage_plan(
     meeting,
     notes,
@@ -7203,6 +7357,14 @@ they are the same technology or part of the same proposal.
 The summary and why_it_matters fields must NOT introduce new
 facts or consequences. They are editorial ranking aids only.
 
+CONDUIT-FINANCING RULE:
+When a separate development/financing authority is issuing a
+loan or bonds for another beneficiary, do NOT describe that as
+City debt, City borrowing, municipal debt, or public debt issued
+by the City unless the supplied official material explicitly says
+the City is the borrower, obligor, debtor, guarantor, or otherwise
+financially liable. Describe the council's approval role precisely.
+
 Do not say an action:
 - "sets a precedent"
 - "signals a commitment"
@@ -7261,6 +7423,11 @@ that a useful local story should not omit.
         plan = CoveragePlan.model_validate_json(
             response.text
         )
+
+    _guard_conduit_financing_coverage_plan(
+        plan,
+        agenda,
+    )
 
     return plan.model_dump()
 
@@ -7883,6 +8050,11 @@ EDITORIAL REQUIREMENTS:
     * any privacy/data concerns actually raised
     * whether any action was taken
 - Include important dollar amounts when supported.
+- When a separate development/financing authority is issuing a
+  loan or bonds for another beneficiary, do NOT call it City debt,
+  City borrowing, municipal debt, or public debt issued by the City
+  unless the evidence explicitly says the City is the borrower,
+  obligor, debtor, guarantor, or otherwise financially liable.
 - Preserve the EXACT scope of contracts and approvals.
   For example, if the council awards a professional-services
   agreement for construction management or inspection, do NOT
@@ -8097,6 +8269,12 @@ NON-NEGOTIABLE EDITORIAL RULES:
     commitments or obligations unless the evidence explicitly
     says that.
 
+19. Do not characterize financing issued by a separate authority
+    for another beneficiary as City debt, City borrowing,
+    municipal debt, or public debt issued by the City unless the
+    evidence explicitly makes the City the borrower, obligor,
+    debtor, guarantor, or otherwise financially liable.
+
 ================ COVERAGE PLAN ================
 
 {context}
@@ -8193,6 +8371,9 @@ REQUIREMENTS:
   important supported details such as money, rules, concerns,
   or next steps.
 - Clearly distinguish council action from discussion only.
+- Do not turn third-party conduit financing into City debt or
+  City borrowing unless the evidence explicitly makes the City
+  the borrower, obligor, debtor, guarantor, or financially liable.
 - Use ONLY the evidence supplied below.
 - Do not invent quotes, facts, names, motives, or background.
 - Do not add generic filler simply to increase length.
