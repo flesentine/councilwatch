@@ -247,3 +247,86 @@ def test_informational_discussion_without_formal_intent_is_allowed():
         story,
         intelligence,
     ) == []
+
+
+
+def test_unvalidated_unresolved_action_does_not_block_final_audit():
+    story = StoryDraft(
+        headline="Council Considers Tax-Exempt Loan",
+        dek="The council held a public hearing.",
+        body=["The disposition remains uncertain."],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    intelligence = _rsm_intelligence("discussed")
+    intelligence["action_ledger"][0]["validated"] = False
+
+    assert pc.unresolved_high_priority_formal_action_issues(
+        story,
+        intelligence,
+    ) == []
+
+
+def test_publishable_city_debt_wording_is_material_issue():
+    story = StoryDraft(
+        headline="Council Considers School Financing",
+        dek="The public hearing concerned a tax-exempt loan.",
+        body=[
+            "The City debt issuance would total up to $10 million."
+        ],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    issues = pc.unsupported_conduit_financing_story_issues(
+        story,
+        RSM_AGENDA,
+    )
+
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.severity == "material"
+    assert issue.field == "body"
+    assert issue.draft_text == story.body[0]
+    assert "does not establish the City as borrower" in issue.source_evidence
+
+
+def test_neutral_conduit_financing_copy_is_allowed():
+    story = StoryDraft(
+        headline="Council Considers CEDA School Financing",
+        dek=(
+            "The council considered approval of a tax-exempt loan "
+            "issued by the California Enterprise Development Authority."
+        ),
+        body=[
+            "The financing would benefit St. Junipero Serra Catholic School."
+        ],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    assert pc.unsupported_conduit_financing_story_issues(
+        story,
+        RSM_AGENDA,
+    ) == []
+
+
+def test_explicit_city_obligation_allows_city_debt_wording():
+    story = StoryDraft(
+        headline="City Debt Financing Considered",
+        dek="The City is the borrower for the financing.",
+        body=["The City debt would total up to $10 million."],
+        key_facts=[],
+        verification_notes=[],
+    )
+
+    agenda = (
+        RSM_AGENDA
+        + "\nThe City is the borrower and obligor for this financing."
+    )
+
+    assert pc.unsupported_conduit_financing_story_issues(
+        story,
+        agenda,
+    ) == []

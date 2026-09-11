@@ -187,6 +187,9 @@ def unresolved_high_priority_formal_action_issues(
         candidates = []
 
         for action in ledger:
+            if action.get("validated") is not True:
+                continue
+
             action_status = str(
                 action.get(
                     "action_status",
@@ -318,6 +321,127 @@ def unresolved_high_priority_formal_action_issues(
                 ),
             )
         )
+
+    return issues
+
+
+def unsupported_conduit_financing_story_issues(
+    story,
+    agenda,
+):
+    """
+    Fail closed when publishable copy assigns third-party conduit
+    financing debt/borrowing to the City without official support.
+
+    This does not rewrite prose. It creates a material audit issue
+    so the exact final copy must be corrected and re-audited.
+    """
+    agenda_lower = str(
+        agenda or ""
+    ).casefold()
+
+    is_conduit_financing = (
+        "tax-exempt loan" in agenda_lower
+        and "development authority" in agenda_lower
+        and "benefit of" in agenda_lower
+    )
+
+    if not is_conduit_financing:
+        return []
+
+    explicit_city_obligation = re.search(
+        r"\bcity(?:\s+of\s+[a-z\s]+)?\s+"
+        r"(?:is|will\s+be|shall\s+be|acts\s+as)\s+"
+        r"(?:the\s+)?(?:borrower|obligor|debtor|guarantor)\b"
+        r"|\bcity(?:'s)?\s+"
+        r"(?:debt|borrowing|financial\s+obligation|liability)\b",
+        agenda_lower,
+    )
+
+    if explicit_city_obligation:
+        return []
+
+    unsupported = re.compile(
+        r"\b(?:"
+        r"city\s+debt(?:\s+issuance)?|"
+        r"city\s+borrowing|"
+        r"municipal\s+debt(?:\s+issuance)?|"
+        r"public\s+debt\s+issuance\s+within\s+the\s+city|"
+        r"public\s+debt\s+(?:issued|issuance)\s+by\s+the\s+city|"
+        r"debt\s+issued\s+by\s+the\s+city"
+        r")\b",
+        re.I,
+    )
+
+    fields = [
+        (
+            "headline",
+            [story.headline],
+        ),
+        (
+            "dek",
+            [story.dek],
+        ),
+        (
+            "body",
+            story.body,
+        ),
+        (
+            "key_facts",
+            story.key_facts,
+        ),
+    ]
+
+    issues = []
+    seen = set()
+
+    for field, values in fields:
+        for raw_value in values:
+            value = str(
+                raw_value or ""
+            ).strip()
+
+            if (
+                not value
+                or not unsupported.search(
+                    value
+                )
+            ):
+                continue
+
+            key = (
+                field,
+                value,
+            )
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            issues.append(
+                AuditIssue(
+                    severity="material",
+                    field=field,
+                    draft_text=value,
+                    source_evidence=(
+                        "The official material describes a "
+                        "tax-exempt loan issued by a separate "
+                        "development/financing authority for "
+                        "another beneficiary and does not "
+                        "establish the City as borrower, obligor, "
+                        "debtor, guarantor, or financially liable."
+                    ),
+                    correction=(
+                        "Describe the financing and the council's "
+                        "approval role precisely without calling "
+                        "it City debt, City borrowing, municipal "
+                        "debt, or debt issued by the City unless "
+                        "official evidence establishes that "
+                        "obligation."
+                    ),
+                )
+            )
 
     return issues
 
@@ -3676,6 +3800,13 @@ def process_city(
             unresolved_high_priority_formal_action_issues(
                 story,
                 intelligence,
+            )
+        )
+
+        deterministic_action_issues.extend(
+            unsupported_conduit_financing_story_issues(
+                story,
+                agenda,
             )
         )
 
