@@ -2890,6 +2890,190 @@ def normalize_validated_action_language(
 
     return changed
 
+
+def missing_required_topic_issues(
+    story,
+    intelligence,
+):
+    """
+    Fail closed when a coverage-plan MUST INCLUDE topic is still
+    absent from the finished article body.
+
+    Topic matching is paragraph-local so words scattered across
+    unrelated paragraphs cannot accidentally satisfy the gate.
+    This is a deterministic editorial-completeness check; it does
+    not turn coverage-plan prose into factual source evidence.
+    """
+
+    stopwords = {
+        "and",
+        "the",
+        "for",
+        "with",
+        "from",
+        "into",
+        "city",
+        "council",
+        "annual",
+        "program",
+        "update",
+        "concerns",
+        "concern",
+        "amendment",
+        "amendments",
+        "project",
+    }
+
+    def words(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").lower(),
+            )
+            if (
+                len(word) >= 4
+                and word not in stopwords
+            )
+        }
+
+    paragraphs = [
+        str(paragraph or "")
+        for paragraph in story.body
+        if str(paragraph or "").strip()
+    ]
+
+    issues = []
+
+    for item in intelligence.get(
+        "coverage_items",
+        [],
+    ):
+        if not item.get("must_include"):
+            continue
+
+        topic = str(
+            item.get(
+                "topic",
+                "",
+            )
+        ).strip()
+
+        topic_words = words(topic)
+
+        # Very short/generic topics are too ambiguous for a
+        # deterministic lexical completeness gate.
+        if len(topic_words) < 2:
+            continue
+
+        if any(
+            len(
+                topic_words
+                & words(paragraph)
+            ) >= 2
+            for paragraph in paragraphs
+        ):
+            continue
+
+        best_action = None
+        best_overlap = 0
+
+        for action in intelligence.get(
+            "action_ledger",
+            [],
+        ):
+            if action.get("validated") is not True:
+                continue
+
+            action_words = words(
+                str(
+                    action.get(
+                        "topic",
+                        "",
+                    )
+                )
+                + " "
+                + str(
+                    action.get(
+                        "agenda_title",
+                        "",
+                    )
+                )
+            )
+
+            overlap = len(
+                topic_words
+                & action_words
+            )
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_action = action
+
+        if best_action and best_overlap >= 2:
+            item_number = str(
+                best_action.get(
+                    "item_number",
+                    "",
+                )
+            ).strip()
+            status = str(
+                best_action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip()
+            evidence_quote = str(
+                best_action.get(
+                    "evidence_quote",
+                    "",
+                )
+            ).strip()
+
+            source_evidence = (
+                "CouncilWatch marked this topic MUST INCLUDE and "
+                "the validated action ledger"
+                + (
+                    f" for agenda item {item_number}"
+                    if item_number
+                    else ""
+                )
+                + (
+                    f" records the action as {status}."
+                    if status
+                    else "."
+                )
+            )
+
+            if evidence_quote:
+                source_evidence += (
+                    " Validated evidence: "
+                    + evidence_quote
+                )
+        else:
+            source_evidence = (
+                "CouncilWatch marked this coverage topic MUST INCLUDE, "
+                "but no finished body paragraph contains enough "
+                "topic-specific anchors to show that it was covered."
+            )
+
+        issues.append(
+            AuditIssue(
+                severity="material",
+                field="body",
+                draft_text=topic,
+                source_evidence=source_evidence,
+                correction=(
+                    "Add a source-supported paragraph covering this "
+                    "MUST INCLUDE topic, then audit the exact saved copy "
+                    "again. Do not mark the draft audit-clean while the "
+                    "required topic is absent."
+                ),
+            )
+        )
+
+    return issues
+
 def restore_required_topics_from_key_facts(
     story,
     intelligence,
@@ -3101,6 +3285,33 @@ def restore_required_topics_from_key_facts(
                             + readable_topic
                             + "."
                         )
+
+                elif action_status in ACTION_FORMAL_STATUSES:
+                    formal_verbs = {
+                        "approved": "approved",
+                        "adopted": "adopted",
+                        "authorized": "authorized",
+                        "awarded": "awarded",
+                        "directed": "directed",
+                        "rejected": "rejected",
+                        "denied": "denied",
+                        "appointed": "appointed",
+                        "accepted": "accepted",
+                        "passed": "passed",
+                    }
+
+                    verb = formal_verbs.get(
+                        action_status,
+                        action_status,
+                    )
+
+                    restore_text = (
+                        "The Council "
+                        + verb
+                        + " "
+                        + readable_topic
+                        + "."
+                    )
 
                 if restore_text:
                     break
@@ -3841,6 +4052,13 @@ def process_city(
             unsupported_conduit_financing_story_issues(
                 story,
                 agenda,
+            )
+        )
+
+        deterministic_action_issues.extend(
+            missing_required_topic_issues(
+                story,
+                intelligence,
             )
         )
 
