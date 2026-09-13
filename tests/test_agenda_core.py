@@ -195,7 +195,9 @@ def test_html_response_removes_non_content_tags_and_limits(monkeypatch):
 def test_granicus_onbase_shell_uses_richer_media_player_text(monkeypatch):
     shell = (
         "<html><body><h1>OnBase Agenda Online</h1>"
-        "<p>Agenda Packet</p></body></html>"
+        "<p>Agenda Packet</p>"
+        + "<p>Navigation shell filler text.</p>" * 40
+        + "</body></html>"
     )
     player = (
         "<html><body><h1>City Council Regular Meeting</h1>"
