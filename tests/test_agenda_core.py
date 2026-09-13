@@ -126,7 +126,7 @@ def test_pdf_response_extracts_pages_normalizes_and_limits(monkeypatch):
 
     text = agenda.agenda_text("https://example.test/agenda", limit=24)
 
-    assert text == "Page one\n\nItem A\n\nPage "
+    assert text == "Page one\n\nItem A\n\nPage t"
 
 
 def test_pdf_extension_is_enough_to_select_pdf_parser(monkeypatch):
