@@ -22,7 +22,7 @@ jobs:
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
-      COVERAGE_FLOOR: "62.0"
+      COVERAGE_FLOOR: "63.5"
 
     steps:
       - name: Check out repository
