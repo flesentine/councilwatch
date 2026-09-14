@@ -183,7 +183,7 @@ def test_match_street_rejects_normalized_canonical_collision(small_registry):
 
 def test_match_street_rejects_insufficient_fuzzy_margin(small_registry):
     result = street_registry.match_street(
-        "Mapl Road",
+        "Mabple Road",
         fuzzy_threshold=0.50,
         minimum_margin=0.99,
     )
