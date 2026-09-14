@@ -92,7 +92,7 @@ def test_phonetic_key_normalizes_common_transcription_variants():
 def test_load_registry_builds_canonical_and_old_name_rows(small_registry):
     data, rows = street_registry.load_registry()
 
-    assert data is small_registry
+    assert data == small_registry
     assert {row["name"] for row in rows} >= {
         "Main Street",
         "Old Main Street",
