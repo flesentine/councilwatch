@@ -46,7 +46,7 @@ def main():
     args = ap.parse_args()
 
     meetings = latest_ready_meetings()
-    if not args.city and len(meetings) != 5:
+    if len(meetings) != 5:
         print(f"WARNING: expected 5 READY meetings; found {len(meetings)}.", flush=True)
 
     status = load_status()
