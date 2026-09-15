@@ -49,26 +49,63 @@ def story_path(meeting):
     )
 
 
-def audited_draft(path):
+def read_draft(path):
     if not path.exists():
-        return False
+        return None
 
     try:
         payload = json.loads(
             path.read_text(encoding="utf-8")
         )
     except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    return payload
+
+
+def hardened_draft(payload):
+    """
+    Identify drafts produced by the modern process_city pipeline.
+
+    Legacy generate_five drafts can have audit_ok=True but never
+    received the validated action ledger, entity verification or
+    exact saved-copy final audit. They must not be silently reused.
+    """
+    if not isinstance(payload, dict):
         return False
 
     return (
-        isinstance(payload, dict)
+        payload.get("final_audit") is True
+        and isinstance(
+            payload.get("action_ledger"),
+            list,
+        )
+        and isinstance(
+            payload.get("coverage_plan"),
+            list,
+        )
+        and isinstance(
+            payload.get("entity_verification"),
+            list,
+        )
+    )
+
+
+def reusable_audited_draft(path):
+    payload = read_draft(path)
+
+    return (
+        hardened_draft(payload)
         and payload.get("audit_ok") is True
     )
 
 
 def mark_existing_complete(meeting, path):
     """
-    Preserve the legacy five-city status behavior for an already
+    Preserve the five-city status behavior for an already hardened,
     audited draft without overwriting status produced by another
     city/process_city invocation.
     """
@@ -84,7 +121,7 @@ def mark_existing_complete(meeting, path):
         "draft": path.name,
         "meeting_date": meeting.get("meeting_date"),
         "external_id": meeting["external_id"],
-        "message": "Existing audited draft reused.",
+        "message": "Existing hardened audited draft reused.",
     }
     save_status(status)
 
@@ -141,6 +178,10 @@ def main():
     for index, meeting in enumerate(meetings, 1):
         slug = meeting["city_slug"]
         output = story_path(meeting)
+        existing_payload = read_draft(output)
+        existing_is_hardened = hardened_draft(
+            existing_payload
+        )
 
         print(
             f"\n[{index}/{len(meetings)}] "
@@ -151,10 +192,10 @@ def main():
 
         if (
             not args.force
-            and audited_draft(output)
+            and reusable_audited_draft(output)
         ):
             print(
-                "  existing audited draft; reusing",
+                "  existing hardened audited draft; reusing",
                 flush=True,
             )
             mark_existing_complete(
@@ -164,11 +205,30 @@ def main():
             success += 1
             continue
 
+        migration_force = (
+            not args.force
+            and output.exists()
+            and not existing_is_hardened
+        )
+
+        if migration_force:
+            print(
+                "  legacy/unhardened draft detected; "
+                "regenerating full evidence and story",
+                flush=True,
+            )
+
         try:
             process_city(
                 slug,
-                force_story=args.force,
-                force_notes=args.force,
+                force_story=(
+                    args.force
+                    or migration_force
+                ),
+                force_notes=(
+                    args.force
+                    or migration_force
+                ),
                 meeting_override=meeting,
             )
 
@@ -181,6 +241,12 @@ def main():
             payload = json.loads(
                 output.read_text(encoding="utf-8")
             )
+
+            if not hardened_draft(payload):
+                raise RuntimeError(
+                    "Hardened processing returned a draft "
+                    "without final-audit verification metadata"
+                )
 
             success += 1
 
