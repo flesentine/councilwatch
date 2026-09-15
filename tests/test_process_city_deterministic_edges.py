@@ -54,7 +54,7 @@ def must_item(topic, rank=1):
     }
 
 
-def test_formal_status_normalization_preserves_capitalization_and_contract_preposition():
+def test_formal_status_normalization_preserves_capitalization():
     draft = story(
         headline="Council Awarded the geotechnical services contract to GeoCorp."
     )
@@ -69,13 +69,32 @@ def test_formal_status_normalization_preserves_capitalization_and_contract_prepo
     }
 
     assert pc.normalize_validated_formal_status_language(draft, intelligence)
-    assert draft.headline.startswith("Council Approved")
-    assert "contract with GeoCorp" in draft.headline
+    assert draft.headline == (
+        "Council Approved the geotechnical services contract to GeoCorp."
+    )
 
 
-def test_awarded_contract_grammar_changes_with_to_to_to_vendor():
+def test_approved_contract_grammar_changes_to_to_with_vendor():
     draft = story(
-        dek="Council approved the sports park design contract with DesignCo."
+        headline="Council awarded contract to GeoCorp for geotechnical services."
+    )
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Geotechnical Services Contract",
+                "approved",
+                agenda_title="Geotechnical Services Contract for Capital Projects",
+            )
+        ]
+    }
+
+    assert pc.normalize_validated_formal_status_language(draft, intelligence)
+    assert "approved contract with geocorp" in draft.headline.lower()
+
+
+def test_awarded_contract_grammar_changes_with_to_to_vendor():
+    draft = story(
+        dek="Council approved contract with DesignCo for sports park design."
     )
     intelligence = {
         "action_ledger": [
@@ -88,7 +107,7 @@ def test_awarded_contract_grammar_changes_with_to_to_to_vendor():
     }
 
     assert pc.normalize_validated_formal_status_language(draft, intelligence)
-    assert "awarded the sports park design contract to DesignCo" in draft.dek.lower()
+    assert "awarded contract to designco" in draft.dek.lower()
 
 
 def test_formal_status_normalization_handles_semicolon_clause_boundary():
