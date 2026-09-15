@@ -52,12 +52,16 @@ TRANSCRIPT_FALLBACK_MODELS = [
 ]
 STORY_MODEL = _first(
     "GEMINI_STORY_MODEL", "STORY_MODEL", "GEMINI_MODEL",
-    default="gemini-3.1-flash-lite",
+    default="gemini-3.8-flash",
 )
 
 DEFAULT_STORY_FALLBACK_MODELS = (
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
 )
 
 STORY_FALLBACK_MODELS = [
