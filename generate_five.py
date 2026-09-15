@@ -7,9 +7,18 @@ import sys
 import traceback
 from datetime import datetime, timezone
 
+import gemini_worker
+import meeting_intelligence
+import process_city as process_city_module
 from meetings import latest_ready_meetings
 from process_city import process_city
-from settings import DRAFTS, STATUS_FILE, TRANSCRIPT_MODEL, STORY_MODEL
+from settings import (
+    DRAFTS,
+    STATUS_FILE,
+    TRANSCRIPT_MODEL,
+    STORY_MODEL,
+    STORY_FALLBACK_MODELS,
+)
 
 
 def load_status():
@@ -126,6 +135,109 @@ def mark_existing_complete(meeting, path):
     save_status(status)
 
 
+def story_model_candidates():
+    candidates = []
+
+    for model in [
+        STORY_MODEL,
+        *STORY_FALLBACK_MODELS,
+    ]:
+        model = str(model or "").strip()
+
+        if model and model not in candidates:
+            candidates.append(model)
+
+    return candidates
+
+
+def retryable_story_model_error(exc):
+    text = str(exc)
+    lowered = text.lower()
+
+    return (
+        "503" in text
+        or "UNAVAILABLE" in text
+        or "500" in text
+        or "ServerError" in text
+        or "internal error encountered" in lowered
+    )
+
+
+def process_city_with_story_failover(
+    slug,
+    meeting,
+    *,
+    force_story,
+    force_notes,
+):
+    """
+    Run one city through the hardened pipeline, failing over to a
+    configured alternate story model only after a transient server
+    availability failure exhausts that model's normal retry loop.
+
+    A fallback attempt always rewrites the story but reuses any source
+    notes/intelligence already saved by the failed attempt. This keeps
+    failover from redownloading media or repeating transcription work.
+    """
+    original_models = (
+        meeting_intelligence.STORY_MODEL,
+        gemini_worker.STORY_MODEL,
+        process_city_module.STORY_MODEL,
+    )
+
+    candidates = story_model_candidates()
+
+    try:
+        for index, model in enumerate(candidates):
+            meeting_intelligence.STORY_MODEL = model
+            gemini_worker.STORY_MODEL = model
+            process_city_module.STORY_MODEL = model
+
+            if index:
+                print(
+                    "  story model fallback: "
+                    f"{model}; reusing cached evidence",
+                    flush=True,
+                )
+
+            try:
+                return process_city(
+                    slug,
+                    force_story=(
+                        force_story
+                        or index > 0
+                    ),
+                    force_notes=(
+                        force_notes
+                        if index == 0
+                        else False
+                    ),
+                    meeting_override=meeting,
+                )
+            except Exception as exc:
+                if (
+                    not retryable_story_model_error(exc)
+                    or index == len(candidates) - 1
+                ):
+                    raise
+
+                print(
+                    "  story model unavailable after retries: "
+                    f"{model}",
+                    flush=True,
+                )
+
+        raise RuntimeError(
+            "No story model candidates configured."
+        )
+    finally:
+        (
+            meeting_intelligence.STORY_MODEL,
+            gemini_worker.STORY_MODEL,
+            process_city_module.STORY_MODEL,
+        ) = original_models
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -167,6 +279,14 @@ def main():
         f"Story model     : {STORY_MODEL}",
         flush=True,
     )
+    if STORY_FALLBACK_MODELS:
+        print(
+            "Story fallbacks : "
+            + ", ".join(
+                story_model_candidates()[1:]
+            ),
+            flush=True,
+        )
     print(
         "Pipeline        : hardened process_city",
         flush=True,
@@ -219,8 +339,9 @@ def main():
             )
 
         try:
-            process_city(
+            process_city_with_story_failover(
                 slug,
+                meeting,
                 force_story=(
                     args.force
                     or migration_force
@@ -229,7 +350,6 @@ def main():
                     args.force
                     or migration_force
                 ),
-                meeting_override=meeting,
             )
 
             if not output.exists():

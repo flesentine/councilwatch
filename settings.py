@@ -54,6 +54,20 @@ STORY_MODEL = _first(
     "GEMINI_STORY_MODEL", "STORY_MODEL", "GEMINI_MODEL",
     default="gemini-3.1-flash-lite",
 )
+
+DEFAULT_STORY_FALLBACK_MODELS = (
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+)
+
+STORY_FALLBACK_MODELS = [
+    model.strip()
+    for model in _first(
+        "GEMINI_STORY_FALLBACK_MODELS",
+        default=",".join(DEFAULT_STORY_FALLBACK_MODELS),
+    ).split(",")
+    if model.strip()
+]
 KEEP_MEDIA = os.getenv("KEEP_MEDIA", "").strip().lower() in {"1", "true", "yes"}
 
 NTFY_SERVER = _first(
