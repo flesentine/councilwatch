@@ -31,14 +31,30 @@ def _configure_paths(tmp_path, monkeypatch):
     return drafts, status
 
 
-def _write_draft(path, *, audit_ok=True, headline="Existing headline"):
-    path.write_text(
-        json.dumps(
+def _write_draft(
+    path,
+    *,
+    audit_ok=True,
+    headline="Existing headline",
+    hardened=True,
+):
+    payload = {
+        "audit_ok": audit_ok,
+        "headline": headline,
+    }
+
+    if hardened:
+        payload.update(
             {
-                "audit_ok": audit_ok,
-                "headline": headline,
+                "final_audit": True,
+                "action_ledger": [],
+                "coverage_plan": [],
+                "entity_verification": [],
             }
-        ),
+        )
+
+    path.write_text(
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -79,7 +95,7 @@ def test_load_status_defaults_reads_valid_json_and_fails_closed(
     assert generate_five.load_status() == expected_default
 
 
-def test_save_status_story_path_and_audited_draft_helpers(
+def test_save_status_story_path_and_draft_classification_helpers(
     tmp_path,
     monkeypatch,
 ):
@@ -108,19 +124,72 @@ def test_save_status_story_path_and_audited_draft_helpers(
     )
     path = generate_five.story_path(meeting)
     assert path == drafts / "rsm--meeting-42.json"
-    assert not generate_five.audited_draft(path)
+    assert generate_five.read_draft(path) is None
+    assert not generate_five.hardened_draft(None)
+    assert not generate_five.reusable_audited_draft(path)
 
     path.write_text("{bad-json", encoding="utf-8")
-    assert not generate_five.audited_draft(path)
+    assert generate_five.read_draft(path) is None
+    assert not generate_five.reusable_audited_draft(path)
 
-    path.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
-    assert not generate_five.audited_draft(path)
+    path.write_text(
+        json.dumps(["not", "a", "dict"]),
+        encoding="utf-8",
+    )
+    assert generate_five.read_draft(path) is None
 
-    _write_draft(path, audit_ok=False)
-    assert not generate_five.audited_draft(path)
+    _write_draft(
+        path,
+        audit_ok=True,
+        hardened=False,
+    )
+    legacy = generate_five.read_draft(path)
+    assert legacy["audit_ok"] is True
+    assert not generate_five.hardened_draft(legacy)
+    assert not generate_five.reusable_audited_draft(path)
 
-    _write_draft(path, audit_ok=True)
-    assert generate_five.audited_draft(path)
+    _write_draft(
+        path,
+        audit_ok=False,
+        hardened=True,
+    )
+    hardened_failed = generate_five.read_draft(path)
+    assert generate_five.hardened_draft(hardened_failed)
+    assert not generate_five.reusable_audited_draft(path)
+
+    _write_draft(
+        path,
+        audit_ok=True,
+        hardened=True,
+    )
+    assert generate_five.hardened_draft(
+        generate_five.read_draft(path)
+    )
+    assert generate_five.reusable_audited_draft(path)
+
+
+def test_hardened_draft_requires_all_verification_metadata():
+    base = {
+        "final_audit": True,
+        "action_ledger": [],
+        "coverage_plan": [],
+        "entity_verification": [],
+    }
+    assert generate_five.hardened_draft(base)
+
+    for key in (
+        "final_audit",
+        "action_ledger",
+        "coverage_plan",
+        "entity_verification",
+    ):
+        payload = dict(base)
+        payload.pop(key)
+        assert not generate_five.hardened_draft(payload)
+
+    wrong_type = dict(base)
+    wrong_type["action_ledger"] = None
+    assert not generate_five.hardened_draft(wrong_type)
 
 
 def test_mark_existing_complete_reloads_status_and_preserves_other_city(
@@ -169,15 +238,15 @@ def test_mark_existing_complete_reloads_status_and_preserves_other_city(
     reused = status["cities"]["lake-forest"]
     assert reused["phase"] == "complete"
     assert reused["draft"] == path.name
-    assert reused["message"] == "Existing audited draft reused."
+    assert reused["message"] == "Existing hardened audited draft reused."
 
 
-def test_main_reuses_five_audited_drafts_without_process_city(
+def test_main_reuses_five_hardened_audited_drafts_without_process_city(
     tmp_path,
     monkeypatch,
     capsys,
 ):
-    drafts, status_file = _configure_paths(
+    _, status_file = _configure_paths(
         tmp_path,
         monkeypatch,
     )
@@ -198,6 +267,7 @@ def test_main_reuses_five_audited_drafts_without_process_city(
         _write_draft(
             generate_five.story_path(meeting),
             audit_ok=True,
+            hardened=True,
         )
 
     monkeypatch.setattr(
@@ -209,7 +279,7 @@ def test_main_reuses_five_audited_drafts_without_process_city(
         generate_five,
         "process_city",
         lambda *args, **kwargs: pytest.fail(
-            "audited drafts should be reused"
+            "hardened audited drafts should be reused"
         ),
     )
     monkeypatch.setattr(
@@ -222,7 +292,9 @@ def test_main_reuses_five_audited_drafts_without_process_city(
 
     output = capsys.readouterr().out
     assert "WARNING:" not in output
-    assert output.count("existing audited draft; reusing") == 5
+    assert output.count(
+        "existing hardened audited draft; reusing"
+    ) == 5
     assert "Pipeline        : hardened process_city" in output
     assert "Finished. Ready: 5 | Failed: 0" in output
 
@@ -235,12 +307,12 @@ def test_main_reuses_five_audited_drafts_without_process_city(
         for meeting in meetings
     }
     assert all(
-        row["message"] == "Existing audited draft reused."
+        row["message"] == "Existing hardened audited draft reused."
         for row in status["cities"].values()
     )
 
 
-def test_main_regenerates_unaudited_draft_through_hardened_pipeline(
+def test_main_migrates_legacy_audit_ok_draft_with_full_force(
     tmp_path,
     monkeypatch,
     capsys,
@@ -250,8 +322,9 @@ def test_main_regenerates_unaudited_draft_through_hardened_pipeline(
     path = generate_five.story_path(meeting)
     _write_draft(
         path,
-        audit_ok=False,
-        headline="Needs regeneration",
+        audit_ok=True,
+        headline="Legacy result",
+        hardened=False,
     )
 
     calls = []
@@ -274,6 +347,73 @@ def test_main_regenerates_unaudited_draft_through_hardened_pipeline(
             path,
             audit_ok=True,
             headline="Hardened result",
+            hardened=True,
+        )
+
+    monkeypatch.setattr(
+        generate_five,
+        "latest_ready_meetings",
+        lambda: [meeting],
+    )
+    monkeypatch.setattr(
+        generate_five,
+        "process_city",
+        fake_process,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["generate_five.py"],
+    )
+
+    generate_five.main()
+
+    assert calls == [
+        (
+            meeting["city_slug"],
+            True,
+            True,
+            meeting,
+        )
+    ]
+    output = capsys.readouterr().out
+    assert "legacy/unhardened draft detected" in output
+    assert "READY FOR REVIEW" in output
+
+
+def test_main_regenerates_hardened_material_draft_without_reacquiring_notes(
+    tmp_path,
+    monkeypatch,
+):
+    _configure_paths(tmp_path, monkeypatch)
+    meeting = _meeting(2)
+    path = generate_five.story_path(meeting)
+    _write_draft(
+        path,
+        audit_ok=False,
+        hardened=True,
+    )
+
+    calls = []
+
+    def fake_process(
+        slug,
+        force_story=False,
+        force_notes=False,
+        meeting_override=None,
+    ):
+        calls.append(
+            (
+                slug,
+                force_story,
+                force_notes,
+                meeting_override,
+            )
+        )
+        _write_draft(
+            path,
+            audit_ok=True,
+            hardened=True,
         )
 
     monkeypatch.setattr(
@@ -302,9 +442,6 @@ def test_main_regenerates_unaudited_draft_through_hardened_pipeline(
             meeting,
         )
     ]
-    output = capsys.readouterr().out
-    assert "READY FOR REVIEW" in output
-    assert "Finished. Ready: 1 | Failed: 0" in output
 
 
 def test_main_force_maps_to_force_story_and_force_notes(
@@ -312,9 +449,13 @@ def test_main_force_maps_to_force_story_and_force_notes(
     monkeypatch,
 ):
     _configure_paths(tmp_path, monkeypatch)
-    meeting = _meeting(2)
+    meeting = _meeting(3)
     path = generate_five.story_path(meeting)
-    _write_draft(path, audit_ok=True)
+    _write_draft(
+        path,
+        audit_ok=True,
+        hardened=True,
+    )
 
     calls = []
 
@@ -332,7 +473,11 @@ def test_main_force_maps_to_force_story_and_force_notes(
                 meeting_override,
             )
         )
-        _write_draft(path, audit_ok=True)
+        _write_draft(
+            path,
+            audit_ok=True,
+            hardened=True,
+        )
 
     monkeypatch.setattr(
         generate_five,
@@ -362,13 +507,13 @@ def test_main_force_maps_to_force_story_and_force_notes(
     ]
 
 
-def test_main_preserves_reviewable_material_issue_draft(
+def test_main_preserves_reviewable_hardened_material_issue_draft(
     tmp_path,
     monkeypatch,
     capsys,
 ):
     _configure_paths(tmp_path, monkeypatch)
-    meeting = _meeting(3)
+    meeting = _meeting(4)
     path = generate_five.story_path(meeting)
 
     def fake_process(*args, **kwargs):
@@ -376,6 +521,7 @@ def test_main_preserves_reviewable_material_issue_draft(
             path,
             audit_ok=False,
             headline="Material issue remains",
+            hardened=True,
         )
 
     monkeypatch.setattr(
@@ -401,6 +547,47 @@ def test_main_preserves_reviewable_material_issue_draft(
     assert "Finished. Ready: 1 | Failed: 0" in output
 
 
+def test_main_rejects_output_missing_hardened_verification_metadata(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    _configure_paths(tmp_path, monkeypatch)
+    meeting = _meeting(5)
+    path = generate_five.story_path(meeting)
+
+    def fake_process(*args, **kwargs):
+        _write_draft(
+            path,
+            audit_ok=True,
+            hardened=False,
+        )
+
+    monkeypatch.setattr(
+        generate_five,
+        "latest_ready_meetings",
+        lambda: [meeting],
+    )
+    monkeypatch.setattr(
+        generate_five,
+        "process_city",
+        fake_process,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["generate_five.py"],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        generate_five.main()
+
+    assert exc.value.code == 2
+    output = capsys.readouterr().out
+    assert "without final-audit verification metadata" in output
+    assert "Finished. Ready: 0 | Failed: 1" in output
+
+
 def test_main_isolates_city_failure_continues_and_exits_two(
     tmp_path,
     monkeypatch,
@@ -424,6 +611,7 @@ def test_main_isolates_city_failure_continues_and_exits_two(
         _write_draft(
             generate_five.story_path(good_meeting),
             audit_ok=True,
+            hardened=True,
         )
 
     monkeypatch.setattr(
