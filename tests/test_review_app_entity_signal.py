@@ -144,7 +144,8 @@ def test_story_focuses_entity_panel_without_mutating_stored_data(
     assert "Planning terminology." not in page
     assert "Civic Center" not in page
 
-    assert "Lower-signal terminology checks remain stored" in page
+    assert "Lower-signal terminology checks" in page
+    assert "remain stored in the draft verification data." in page
 
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["entity_verification"] == data["entity_verification"]
