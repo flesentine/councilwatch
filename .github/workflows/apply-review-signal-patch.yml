@@ -23,8 +23,8 @@ jobs:
 
       - name: Run focused review tests
         run: |
-          python -m pip install -r requirements.txt
-          pytest -q tests/test_review_app_core.py tests/test_review_app_entity_signal.py
+          python -m pip install -r requirements.txt pytest
+          python -m pytest -q tests/test_review_app_core.py tests/test_review_app_entity_signal.py
 
       - name: Commit guarded patch
         shell: bash
