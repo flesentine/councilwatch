@@ -25,6 +25,7 @@ OFFICIAL_ENTITY_SOURCES = {
             "commissions-committees/commissions/"
             "planning-and-transportation-commission"
         ),
+        "https://dms.missionviejo.gov/OnBaseAgendaOnline/Meetings",
     ],
     "laguna-niguel": [
         "https://www.cityoflagunaniguel.org/396/Mayor-City-Council",
