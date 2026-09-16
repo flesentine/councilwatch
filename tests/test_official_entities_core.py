@@ -147,6 +147,43 @@ def test_official_entity_material_uses_city_sources_and_skips_empty_pages(
     )
 
 
+def test_mission_viejo_sources_include_planning_commission_roster():
+    roster_url = (
+        "https://www.missionviejo.gov/government/"
+        "commissions-committees/commissions/"
+        "planning-and-transportation-commission"
+    )
+
+    assert roster_url in oe.OFFICIAL_ENTITY_SOURCES["mission-viejo"]
+
+    pages = [
+        {
+            "url": roster_url,
+            "text": (
+                "Chair: LaVal Brewer\n"
+                "Vice Chair: Robert D. Breton\n"
+                "Joe Blum\n"
+                "Gary Disney\n"
+                "Peter Molinari"
+            ),
+        }
+    ]
+
+    for name in (
+        "LaVal Brewer",
+        "Robert D. Breton",
+        "Joe Blum",
+        "Gary Disney",
+        "Peter Molinari",
+    ):
+        assert oe.find_official_support(
+            name,
+            "",
+            "",
+            pages,
+        ) == roster_url
+
+
 def test_official_entity_material_unknown_or_missing_city_is_empty(monkeypatch):
     monkeypatch.setattr(oe, "OFFICIAL_ENTITY_SOURCES", {"rsm": ["unused"]})
 

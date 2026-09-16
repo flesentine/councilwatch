@@ -20,6 +20,11 @@ OFFICIAL_ENTITY_SOURCES = {
     "mission-viejo": [
         "https://www.missionviejo.gov/government/city-council",
         "https://www.missionviejo.gov/government/city-directory",
+        (
+            "https://www.missionviejo.gov/government/"
+            "commissions-committees/commissions/"
+            "planning-and-transportation-commission"
+        ),
     ],
     "laguna-niguel": [
         "https://www.cityoflagunaniguel.org/396/Mayor-City-Council",
