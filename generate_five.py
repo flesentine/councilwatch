@@ -396,7 +396,7 @@ def main():
         flush=True,
     )
     print(
-        "Review: http://raspberrypi.local:8080",
+        "Review: http://raspberrypi.local:8088",
         flush=True,
     )
 
