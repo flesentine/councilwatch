@@ -133,9 +133,7 @@ def test_stale_coverage_plan_is_hidden_from_review_page(
     write_draft(
         drafts,
         base_draft(
-            coverage_plan_status=(
-                "stale_after_manual_edit"
-            ),
+            manually_edited=True,
         ),
     )
 
