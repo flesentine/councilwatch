@@ -594,12 +594,20 @@ def story(slug: str, external_id: str):
 
     coverage_rows = []
 
+    default_coverage_plan_status = (
+        "stale_after_manual_edit"
+        if target.get(
+            "manually_edited"
+        )
+        else "fresh"
+    )
+
     coverage_plan_status = str(
         target.get(
             "coverage_plan_status",
-            "fresh",
+            default_coverage_plan_status,
         )
-        or "fresh"
+        or default_coverage_plan_status
     )
 
     if (
