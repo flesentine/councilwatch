@@ -5897,6 +5897,44 @@ def _official_url_is_real(
         return False
 
 
+def source_note_audit_requirements():
+    """
+    Requirements that make audio-derived notes useful as durable
+    fact-audit evidence rather than only as a meeting summary.
+    """
+    return """
+AUDIT EVIDENCE REQUIREMENTS:
+
+For EVERY substantive topic, preserve an audit-grade evidence capsule
+with enough exact detail to verify later article edits without replaying
+the recording.
+
+Each evidence capsule should capture, when present:
+- the exact action status: proposed, discussed, directed, approved,
+  adopted, denied, awarded, received, or no action
+- motion and vote outcome, without inferring a result from an agenda
+  recommendation
+- exact dollar amounts, percentages, dates, addresses, square footage,
+  suite numbers, quantities, contract length, and contingency terms
+- what a councilmember or staff member specifically requested staff to
+  research or report back on
+- ownership, operation, control, deployment, data acquisition,
+  retention, sharing, and policy distinctions for surveillance or
+  technology systems
+- distinctions between City-owned systems and privately owned systems
+- distinctions between separate projects or agenda topics discussed
+  near each other
+
+Use the most precise number or location stated in the recording.
+Do NOT round a precise number into a simpler approximate number.
+Do NOT merge facts from adjacent topics.
+Do NOT turn an agenda recommendation into a completed council action.
+
+When a detail is uncertain, preserve the uncertainty explicitly rather
+than silently choosing an interpretation.
+""".strip()
+
+
 def make_comprehensive_source_notes(
     audio_path,
     meeting,
@@ -5984,6 +6022,8 @@ Cover, when present:
 - major infrastructure projects
 - major consent-calendar expenditures
 - discussions where NO vote was taken
+
+{source_note_audit_requirements()}
 
 TECHNOLOGY SEPARATION RULE:
 - Never merge different technologies merely because they were
