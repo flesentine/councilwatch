@@ -13,7 +13,7 @@ Type=simple
 WorkingDirectory=$HERE
 Environment=PYTHONUTF8=1
 Environment=PYTHONIOENCODING=utf-8
-ExecStart=$HERE/.venv/bin/uvicorn review_app:app --host 0.0.0.0 --port 8080
+ExecStart=$HERE/.venv/bin/uvicorn review_app:app --host 0.0.0.0 --port 8088
 Restart=on-failure
 RestartSec=3
 
@@ -39,4 +39,4 @@ systemctl --user enable --now councilwatch-review.service
 
 echo
 echo "Review server started:"
-echo "  http://raspberrypi.local:8080"
+echo "  http://raspberrypi.local:8088"
