@@ -9,6 +9,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from agenda import agenda_text
+from evidence import (
+    assemble_audit_notes,
+    load_agenda_evidence,
+    read_reviewer_evidence,
+    write_reviewer_evidence,
+)
 from gemini_worker import StoryDraft, audit_story
 from meeting_intelligence import audit_verification_context
 from newsletter import ensure_buttondown_draft
@@ -588,36 +594,66 @@ def story(slug: str, external_id: str):
 
     coverage_rows = []
 
-    for item in target.get(
-        "coverage_plan",
-        [],
+    default_coverage_plan_status = (
+        "stale_after_manual_edit"
+        if target.get(
+            "manually_edited"
+        )
+        else "fresh"
+    )
+
+    coverage_plan_status = str(
+        target.get(
+            "coverage_plan_status",
+            default_coverage_plan_status,
+        )
+        or default_coverage_plan_status
+    )
+
+    if (
+        coverage_plan_status
+        == "stale_after_manual_edit"
     ):
-        if not isinstance(item, dict):
-            continue
-
-        must = (
-            " · MUST INCLUDE"
-            if item.get(
-                "must_include"
-            )
-            else ""
-        )
-
         coverage_rows.append(
-            f"<li>"
-            f"<strong>"
-            f"#{esc(item.get('rank'))} · "
-            f"{esc(item.get('score'))}/10"
-            f"{must} · "
-            f"{esc(item.get('topic'))}"
-            f"</strong>"
-            f"<br>Status: "
-            f"{esc(item.get('action_status'))}"
-            f"<br>{esc(item.get('summary'))}"
-            f"<br><em>Why it matters:</em> "
-            f"{esc(item.get('why_it_matters'))}"
-            f"</li>"
+            "<li>"
+            "<strong>STALE AFTER MANUAL EDIT</strong>"
+            "<br>The original generation-time coverage plan "
+            "is preserved in the draft data for traceability, "
+            "but it is hidden here because article edits may "
+            "have made its summaries or status labels obsolete."
+            "</li>"
         )
+    else:
+        for item in target.get(
+            "coverage_plan",
+            [],
+        ):
+            if not isinstance(item, dict):
+                continue
+
+            must = (
+                " · MUST INCLUDE"
+                if item.get(
+                    "must_include"
+                )
+                else ""
+            )
+
+            coverage_rows.append(
+                f"<li>"
+                f"<strong>"
+                f"#{esc(item.get('rank'))} · "
+                f"{esc(item.get('score'))}/10"
+                f"{must} · "
+                f"{esc(item.get('topic'))}"
+                f"</strong>"
+                f"<br>Status: "
+                f"{esc(item.get('action_status'))}"
+                f"<br>{esc(item.get('summary'))}"
+                f"<br><em>Why it matters:</em> "
+                f"{esc(item.get('why_it_matters'))}"
+                f"</li>"
+            )
 
     coverage_html = "".join(
         coverage_rows
@@ -1117,6 +1153,12 @@ def edit_story(slug: str, external_id: str):
         )
     )
 
+    evidence_text = read_reviewer_evidence(
+        DRAFTS,
+        slug,
+        str(external_id),
+    )
+
     script = """
 <script>
 const SLUG = %s;
@@ -1153,7 +1195,10 @@ async function saveStory() {
             .value.trim(),
         body: body,
         key_facts: keyFacts,
-        verification_notes: verificationNotes
+        verification_notes: verificationNotes,
+        evidence_supplement: document
+            .getElementById("evidence")
+            .value.trim()
     };
 
     const r = await fetch(
@@ -1232,6 +1277,16 @@ async function saveStory() {
         Verification notes — one per line
       </label>
       <textarea id="notes">{esc(notes_text)}</textarea>
+
+      <label class="edit-label">
+        Reviewer source evidence supplement
+      </label>
+      <div class="note">
+        Optional. Add only factual evidence from an official agenda,
+        recording, minutes or other authoritative source. This text is
+        available to Re-audit but is never published.
+      </div>
+      <textarea id="evidence">{esc(evidence_text)}</textarea>
 
       <div class="actions">
         <button class="primary"
@@ -1432,6 +1487,11 @@ async def save_story(
         [],
     )
 
+    evidence_supplement = payload.get(
+        "evidence_supplement",
+        None,
+    )
+
     if not headline:
         return JSONResponse(
             {
@@ -1472,6 +1532,14 @@ async def save_story(
         path,
         target,
     )
+
+    if evidence_supplement is not None:
+        write_reviewer_evidence(
+            DRAFTS,
+            slug,
+            str(external_id),
+            str(evidence_supplement),
+        )
 
     target["headline"] = headline
     target["dek"] = dek
@@ -1518,6 +1586,10 @@ async def save_story(
     target["audit_status"] = (
         "stale_after_manual_edit"
     )
+    target["coverage_plan_status"] = (
+        "stale_after_manual_edit"
+    )
+    target["coverage_plan_stale_at"] = now()
 
     if target.get("published"):
         remove_published_copy(
@@ -1762,29 +1834,46 @@ def reaudit_story(
         except Exception:
             intelligence = {}
 
-    audit_notes = notes
+    verification_context = ""
 
     if intelligence:
-        audit_notes += (
-            "\n\n"
-            + audit_verification_context(
+        verification_context = (
+            audit_verification_context(
                 intelligence
             )
         )
 
-    agenda = ""
+    reviewer_evidence = read_reviewer_evidence(
+        DRAFTS,
+        slug,
+        str(external_id),
+    )
+
+    audit_notes = assemble_audit_notes(
+        notes,
+        verification_context=(
+            verification_context
+        ),
+        reviewer_evidence=(
+            reviewer_evidence
+        ),
+    )
 
     agenda_url = target.get(
         "agenda_url"
     )
 
-    if agenda_url:
-        try:
-            agenda = agenda_text(
-                agenda_url
-            )
-        except Exception:
-            agenda = ""
+    try:
+        agenda, _agenda_source = load_agenda_evidence(
+            DRAFTS,
+            slug,
+            str(external_id),
+            agenda_url,
+            agenda_text,
+            refresh=False,
+        )
+    except Exception:
+        agenda = ""
 
     meeting = {
         "city_slug": target.get(
