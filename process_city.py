@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agenda import agenda_text
+from evidence import load_agenda_evidence
 from gemini_worker import (
     AuditIssue,
     make_source_notes,
@@ -3643,10 +3644,13 @@ def process_city(
         agenda_url = meeting.get("agenda_url") or ""
 
         try:
-            agenda = (
-                agenda_text(agenda_url)
-                if agenda_url
-                else ""
+            agenda, agenda_source = load_agenda_evidence(
+                DRAFTS,
+                slug,
+                external_id,
+                agenda_url,
+                agenda_text,
+                refresh=force_notes,
             )
         except Exception as exc:
             print(
@@ -3655,11 +3659,13 @@ def process_city(
                 exc,
             )
             agenda = ""
+            agenda_source = "none"
 
         if agenda:
             print(
                 "Agenda/source text:",
-                f"{len(agenda):,} characters"
+                f"{len(agenda):,} characters",
+                f"[{agenda_source}]",
             )
         else:
             print(
@@ -4124,6 +4130,7 @@ def process_city(
                     "coverage_items",
                     [],
                 ),
+            "coverage_plan_status": "fresh",
             "editorial_summary":
                 intelligence.get(
                     "editorial_summary",
