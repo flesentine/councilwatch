@@ -159,6 +159,10 @@ def retryable_story_model_error(exc):
         or "UNAVAILABLE" in text
         or "500" in text
         or "ServerError" in text
+        or "429" in text
+        or "RESOURCE_EXHAUSTED" in text
+        or "quota exceeded" in lowered
+        or "rate limit" in lowered
         or "internal error encountered" in lowered
     )
 

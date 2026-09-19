@@ -337,3 +337,54 @@ def test_nonforced_failover_preserves_existing_intelligence_cache(
         (False, True),
         (False, True),
     ]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "429 RESOURCE_EXHAUSTED: quota exceeded",
+        "ClientError 429: rate limit exceeded",
+        "RESOURCE_EXHAUSTED",
+        "Quota exceeded for metric: generate_content",
+    ],
+)
+def test_story_failover_treats_quota_errors_as_retryable(
+    monkeypatch,
+    message,
+):
+    _set_models(
+        monkeypatch,
+        "primary",
+        ["fallback-a"],
+    )
+
+    calls = []
+
+    def fake_process_city(*args, **kwargs):
+        calls.append(
+            generate_five.meeting_intelligence.STORY_MODEL
+        )
+
+        if len(calls) == 1:
+            raise RuntimeError(message)
+
+        return "ok"
+
+    monkeypatch.setattr(
+        generate_five,
+        "process_city",
+        fake_process_city,
+    )
+
+    result = generate_five.process_city_with_story_failover(
+        "laguna-niguel",
+        MEETING,
+        force_story=True,
+        force_notes=False,
+    )
+
+    assert result == "ok"
+    assert calls == [
+        "primary",
+        "fallback-a",
+    ]
