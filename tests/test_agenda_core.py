@@ -71,7 +71,7 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
     assert "ignore me" not in text
     assert len(calls) == 2
     assert calls[0][1]["allow_redirects"] is True
-    assert "allow_redirects" not in calls[1][1]
+    assert calls[1][1]["allow_redirects"] is True
 
 
 def test_failed_granicus_player_preserves_original_fetch_error(monkeypatch):
