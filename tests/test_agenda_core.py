@@ -44,12 +44,18 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
 
     def fake_get(url, **kwargs):
         calls.append((url, kwargs))
+
         if "/AgendaViewer.php" in url:
             raise RuntimeError("agenda unavailable")
+
+        if "GeneratedAgendaViewer.php" in url:
+            raise RuntimeError("generated agenda unavailable")
+
         assert url == (
             "https://city.test.granicus.com/MediaPlayer.php"
             "?view_id=2&clip_id=981"
         )
+
         return FakeResponse(
             text=(
                 "<html><body><h1>City Council</h1>"
@@ -69,9 +75,12 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
     assert "City Council" in text
     assert "Item 6.1 School financing" in text
     assert "ignore me" not in text
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0][1]["allow_redirects"] is True
     assert calls[1][1]["allow_redirects"] is True
+    assert calls[2][1]["allow_redirects"] is True
+    assert "MediaPlayer.php" in calls[1][0]
+    assert "GeneratedAgendaViewer.php" in calls[2][0]
 
 
 def test_failed_granicus_player_preserves_original_fetch_error(monkeypatch):
