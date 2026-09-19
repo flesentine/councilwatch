@@ -3117,6 +3117,52 @@ def missing_substantive_formal_action_issues(
     return issues
 
 
+
+_COVERAGE_GENERIC_ANCHORS = {
+    "annual",
+    "fiscal",
+    "financial",
+    "meeting",
+    "report",
+    "reports",
+    "result",
+    "results",
+    "session",
+    "study",
+    "year",
+}
+
+
+def _topic_coverage_match(
+    topic_words,
+    candidate_words,
+):
+    """
+    Require at least two lexical overlaps and at least one
+    topic-specific anchor.
+
+    Generic time/report vocabulary such as "fiscal year" cannot,
+    by itself, prove that a distinct budget, CAPER, contract or
+    other MUST INCLUDE topic was actually covered.
+    """
+    overlap = set(topic_words) & set(candidate_words)
+
+    if len(overlap) < 2:
+        return False
+
+    specific = (
+        set(topic_words)
+        - _COVERAGE_GENERIC_ANCHORS
+    )
+
+    if not specific:
+        return True
+
+    return bool(
+        overlap
+        & specific
+    )
+
 def missing_required_topic_issues(
     story,
     intelligence,
@@ -3194,10 +3240,10 @@ def missing_required_topic_issues(
             continue
 
         if any(
-            len(
-                topic_words
-                & words(paragraph)
-            ) >= 2
+            _topic_coverage_match(
+                topic_words,
+                words(paragraph),
+            )
             for paragraph in paragraphs
         ):
             continue
@@ -3227,6 +3273,12 @@ def missing_required_topic_issues(
                     )
                 )
             )
+
+            if not _topic_coverage_match(
+                topic_words,
+                action_words,
+            ):
+                continue
 
             overlap = len(
                 topic_words
@@ -3376,18 +3428,12 @@ def restore_required_topics_from_key_facts(
         if len(topic_words) < 2:
             continue
 
-        body_words = words(
-            "\n".join(
-                story.body
+        if any(
+            _topic_coverage_match(
+                topic_words,
+                words(paragraph),
             )
-        )
-
-        if (
-            len(
-                topic_words
-                & body_words
-            )
-            >= 2
+            for paragraph in story.body
         ):
             continue
 
@@ -3395,9 +3441,17 @@ def restore_required_topics_from_key_facts(
         best_score = 0
 
         for fact in story.key_facts:
+            fact_words = words(fact)
+
+            if not _topic_coverage_match(
+                topic_words,
+                fact_words,
+            ):
+                continue
+
             score = len(
                 topic_words
-                & words(fact)
+                & fact_words
             )
 
             if score > best_score:
@@ -3433,12 +3487,9 @@ def restore_required_topics_from_key_facts(
                     )
                 ).strip()
 
-                if (
-                    len(
-                        topic_words
-                        & words(action_topic)
-                    )
-                    < 2
+                if not _topic_coverage_match(
+                    topic_words,
+                    words(action_topic),
                 ):
                     continue
 
@@ -3572,6 +3623,292 @@ def restore_required_topics_from_key_facts(
 
     return changed
 
+
+
+_STREET_ADDRESS_RE = re.compile(
+    r"\b"
+    r"\d{1,6}\s+"
+    r"(?:[A-Za-z0-9.'-]+\s+){0,5}"
+    r"(?:"
+    r"Street|St|Road|Rd|Avenue|Ave|Boulevard|Blvd|"
+    r"Circle|Cir|Drive|Dr|Lane|Ln|Way|Court|Ct|"
+    r"Place|Pl|Trail|Trl|Parkway|Pkwy"
+    r")\b",
+    re.I,
+)
+
+
+def redact_validated_private_addresses(
+    story,
+    intelligence,
+):
+    """
+    Remove a street address from reader-facing copy when a
+    source-validated Council action specifically directs address
+    redaction/privacy for the same underlying topic.
+
+    The privacy action is linked to agenda/action rows by at least
+    two topical words, so an unrelated public address elsewhere in
+    the meeting is preserved.
+    """
+    actions = [
+        action
+        for action in intelligence.get(
+            "action_ledger",
+            [],
+        )
+        if action.get("validated") is True
+    ]
+
+    if not actions:
+        return False
+
+    privacy_terms = re.compile(
+        r"\b(?:"
+        r"privacy|private|confidential|"
+        r"redact(?:ed|ion|ing)?|"
+        r"remove(?:d|s|ing)?|"
+        r"omit(?:ted|s|ting)?|"
+        r"withhold(?:ing)?"
+        r")\b",
+        re.I,
+    )
+
+    address_terms = re.compile(
+        r"\b(?:"
+        r"address|addresses|"
+        r"street\s+address|"
+        r"property\s+address"
+        r")\b",
+        re.I,
+    )
+
+    stopwords = {
+        "and",
+        "the",
+        "for",
+        "with",
+        "from",
+        "into",
+        "city",
+        "council",
+        "property",
+        "address",
+        "privacy",
+        "private",
+        "directive",
+    }
+
+    def action_text(action):
+        return " ".join(
+            str(
+                action.get(field, "")
+                or ""
+            )
+            for field in (
+                "topic",
+                "agenda_title",
+                "evidence_quote",
+                "validation_note",
+            )
+        )
+
+    def topic_words(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").lower(),
+            )
+            if (
+                len(word) >= 4
+                and not word.isdigit()
+                and word not in stopwords
+            )
+        }
+
+    privacy_actions = []
+
+    for action in actions:
+        combined = action_text(
+            action
+        )
+
+        if (
+            privacy_terms.search(
+                combined
+            )
+            and address_terms.search(
+                combined
+            )
+        ):
+            privacy_actions.append(
+                action
+            )
+
+    if not privacy_actions:
+        return False
+
+    protected_addresses = set()
+
+    for privacy_action in privacy_actions:
+        privacy_text = action_text(
+            privacy_action
+        )
+
+        protected_addresses.update(
+            match.group(0)
+            for match in _STREET_ADDRESS_RE.finditer(
+                privacy_text
+            )
+        )
+
+        privacy_words = topic_words(
+            str(
+                privacy_action.get(
+                    "topic",
+                    "",
+                )
+            )
+        )
+
+        if len(privacy_words) < 2:
+            continue
+
+        for action in actions:
+            if action is privacy_action:
+                continue
+
+            candidate_text = action_text(
+                action
+            )
+            candidate_words = topic_words(
+                str(
+                    action.get(
+                        "topic",
+                        "",
+                    )
+                )
+                + " "
+                + str(
+                    action.get(
+                        "agenda_title",
+                        "",
+                    )
+                )
+            )
+
+            if (
+                len(
+                    privacy_words
+                    & candidate_words
+                )
+                < 2
+            ):
+                continue
+
+            protected_addresses.update(
+                match.group(0)
+                for match in _STREET_ADDRESS_RE.finditer(
+                    candidate_text
+                )
+            )
+
+    protected_addresses = {
+        address.strip()
+        for address in protected_addresses
+        if address.strip()
+    }
+
+    if not protected_addresses:
+        return False
+
+    changed = False
+
+    def scrub(value):
+        nonlocal changed
+
+        cleaned = str(
+            value or ""
+        )
+
+        for address in sorted(
+            protected_addresses,
+            key=len,
+            reverse=True,
+        ):
+            # Prefer removing "at <address>" so phrases such as
+            # "the property at 35 Playa Circle" become simply
+            # "the property".
+            at_pattern = re.compile(
+                r"\s+at\s+"
+                + re.escape(address)
+                + r"\b",
+                re.I,
+            )
+
+            new_value = at_pattern.sub(
+                "",
+                cleaned,
+            )
+
+            if new_value != cleaned:
+                cleaned = new_value
+                changed = True
+
+            direct_pattern = re.compile(
+                re.escape(address),
+                re.I,
+            )
+
+            new_value = direct_pattern.sub(
+                "the property",
+                cleaned,
+            )
+
+            if new_value != cleaned:
+                cleaned = new_value
+                changed = True
+
+        cleaned = re.sub(
+            r"\bthe\s+property\s+at\s+the\s+property\b",
+            "the property",
+            cleaned,
+            flags=re.I,
+        )
+
+        cleaned = re.sub(
+            r"[ \t]{2,}",
+            " ",
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"\s+([,.;:])",
+            r"\1",
+            cleaned,
+        )
+
+        return cleaned.strip()
+
+    story.headline = scrub(
+        story.headline
+    )
+    story.dek = scrub(
+        story.dek
+    )
+    story.body = [
+        scrub(paragraph)
+        for paragraph in story.body
+        if str(paragraph or "").strip()
+    ]
+    story.key_facts = [
+        scrub(fact)
+        for fact in story.key_facts
+        if str(fact or "").strip()
+    ]
+
+    return changed
 
 def apply_audit_corrections(story, audit):
     changed = False
@@ -4045,6 +4382,12 @@ def process_city(
         ):
             public_guard_changed = True
 
+        if redact_validated_private_addresses(
+            story,
+            intelligence,
+        ):
+            public_guard_changed = True
+
         if public_guard_changed:
             print(
                 "Applied deterministic "
@@ -4131,6 +4474,18 @@ def process_city(
                     changed = True
 
                 if restore_required_topics_from_key_facts(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if redact_validated_private_addresses(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if redact_validated_private_addresses(
                     story,
                     intelligence,
                 ):
