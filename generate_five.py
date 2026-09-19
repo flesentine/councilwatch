@@ -187,6 +187,25 @@ def process_city_with_story_failover(
 
     candidates = story_model_candidates()
 
+    if force_notes:
+        intelligence_file = (
+            DRAFTS
+            / (
+                f"{meeting['city_slug']}--"
+                f"{meeting['external_id']}.intelligence.json"
+            )
+        )
+
+        try:
+            intelligence_file.unlink()
+            print(
+                "  invalidated stale intelligence cache "
+                "for forced rerun",
+                flush=True,
+            )
+        except FileNotFoundError:
+            pass
+
     try:
         for index, model in enumerate(candidates):
             meeting_intelligence.STORY_MODEL = model
