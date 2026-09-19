@@ -812,6 +812,126 @@ def parse_agenda_structure(agenda):
     return items
 
 
+SUBSTANTIVE_FORMAL_AGENDA_PATTERN = re.compile(
+    r"\b(?:"
+    r"budget|appropriat(?:e|ion|ed|ing)?|reappropriat\w*|"
+    r"caper|community\s+development\s+block\s+grant|cdbg|"
+    r"ordinance|resolution|"
+    r"contract|agreement|lease|"
+    r"grant|tax|fee|bond|loan|"
+    r"zoning|land\s+use|development\s+agreement|"
+    r"conditional\s+use\s+permit|exception\s+permit|permit|"
+    r"award|purchase|acquisition|"
+    r"capital\s+improvement"
+    r")\b",
+    re.I,
+)
+
+
+ROUTINE_FORMAL_AGENDA_PATTERN = re.compile(
+    r"\b(?:"
+    r"waive\s+the\s+reading|"
+    r"approval\s+of\s+minutes|"
+    r"treasurer(?:'|’)?s\s+statement|"
+    r"business\s+spotlight|business\s+of\s+the\s+month|"
+    r"proclamation|recognition"
+    r")\b",
+    re.I,
+)
+
+
+def substantive_formal_agenda_items(agenda):
+    """
+    Return deterministic official-agenda candidates that deserve
+    explicit editorial/action-ledger consideration.
+
+    This is a completeness guard, not evidence of meeting outcome.
+    The agenda proves only that the item was scheduled. Final action
+    still requires recording-derived or otherwise validated evidence.
+    """
+
+    candidates = []
+
+    for item in parse_agenda_structure(
+        agenda
+    ):
+        title = str(
+            item.get(
+                "title",
+                "",
+            )
+        ).strip()
+
+        if not title:
+            continue
+
+        if ROUTINE_FORMAL_AGENDA_PATTERN.search(
+            title
+        ):
+            continue
+
+        if not SUBSTANTIVE_FORMAL_AGENDA_PATTERN.search(
+            title
+        ):
+            continue
+
+        candidates.append(
+            item
+        )
+
+    return candidates
+
+
+def formal_agenda_checklist_text(agenda):
+    candidates = (
+        substantive_formal_agenda_items(
+            agenda
+        )
+    )
+
+    if not candidates:
+        return "- NONE"
+
+    lines = []
+
+    for item in candidates:
+        number = str(
+            item.get(
+                "item_number",
+                "",
+            )
+        ).strip()
+        section = str(
+            item.get(
+                "section",
+                "",
+            )
+        ).strip()
+        title = str(
+            item.get(
+                "title",
+                "",
+            )
+        ).strip()
+
+        label = (
+            f"Item {number}"
+            if number
+            else "Agenda item"
+        )
+
+        if section:
+            label += f" [{section}]"
+
+        lines.append(
+            f"- {label}: {title}"
+        )
+
+    return "\n".join(
+        lines
+    )
+
+
 def _action_topic_component_labels(
     topic,
 ):
@@ -4506,6 +4626,34 @@ def build_action_ledger(
         if str(item.get("topic") or "").strip()
     ]
 
+    formal_agenda_items = (
+        substantive_formal_agenda_items(
+            agenda
+        )
+    )
+
+    for item in formal_agenda_items:
+        title = str(
+            item.get(
+                "title",
+                "",
+            )
+        ).strip()
+
+        if (
+            title
+            and title not in required_topics
+        ):
+            required_topics.append(
+                title
+            )
+
+    formal_agenda_checklist = (
+        formal_agenda_checklist_text(
+            agenda
+        )
+    )
+
     prompt = f"""
 You are extracting a factual action ledger from a city council
 meeting for a local-news fact-checking system.
@@ -4529,6 +4677,15 @@ CRITICAL RULES:
 0. REQUIRED TOPIC COMPLETENESS:
    Return at least one action-ledger record for EVERY topic
    listed under REQUIRED COVERAGE TOPICS below.
+
+   REQUIRED COVERAGE TOPICS include deterministic substantive
+   official-agenda candidates even when the coverage-ranking model
+   failed to select them. This is intentional: budget amendments,
+   appropriations/reappropriations, CAPER/CDBG actions, contracts,
+   agreements, leases, ordinances/resolutions, grants, taxes/fees,
+   bonds/loans, land-use/permit actions and similar formal business
+   must not disappear from the factual action ledger merely because
+   public comment or ceremonial material was more salient.
 
    Do not omit a topic merely because its final disposition
    is uncertain.
@@ -4568,6 +4725,14 @@ CRITICAL RULES:
 ================ REQUIRED COVERAGE TOPICS ================
 
 {json.dumps(required_topics, ensure_ascii=False, indent=2)}
+
+================ FORMAL AGENDA COMPLETENESS CHECKLIST ================
+
+{formal_agenda_checklist}
+
+The checklist is NOT evidence that any item passed. It is a
+deterministic list of substantive official-agenda items that must
+receive an action-ledger disposition grounded in the source evidence.
 
 ================ RECORDING-DERIVED NOTES ================
 
@@ -7492,6 +7657,12 @@ def build_coverage_plan(
     agenda,
     entities,
 ):
+    formal_agenda_checklist = (
+        formal_agenda_checklist_text(
+            agenda
+        )
+    )
+
     entity_context = json.dumps(
         entities,
         ensure_ascii=False,
@@ -7574,6 +7745,25 @@ Consent-calendar items may still be highly newsworthy,
 especially when substantial money or public impact is
 involved.
 
+FORMAL-AGENDA COMPLETENESS RULE:
+The deterministic checklist below identifies substantive official
+agenda items involving budget/fiscal changes, appropriations,
+CAPER/CDBG actions, contracts/agreements/leases,
+ordinances/resolutions, grants, taxes/fees, bonds/loans,
+land-use/permit actions and similar formal business.
+
+You MUST explicitly consider every checklist item as its own topic.
+Do not let a proclamation, business spotlight, routine announcement,
+committee update or discussion-only public comment displace a
+substantive formal agenda item from the coverage plan merely because
+the ceremonial/comment material was longer or more vivid.
+
+The checklist does NOT prove an outcome. Use Approved/Adopted/
+Authorized/etc. only when the supplied evidence establishes that
+status for the same item. If outcome evidence is absent, retain the
+topic with a conservative status such as Considered or Unclear rather
+than silently omitting it.
+
 If ALPR, license-plate readers, Flock Safety or similar
 camera technology appears ANYWHERE in the notes, it must
 receive its own coverage item.
@@ -7609,6 +7799,10 @@ Choose approximately 4-7 substantive topics.
 
 Set must_include=true for roughly the top 3-5 items
 that a useful local story should not omit.
+
+================ FORMAL AGENDA COMPLETENESS CHECKLIST ================
+
+{formal_agenda_checklist}
 
 ================ VERIFIED ENTITY DATA ================
 
@@ -8270,6 +8464,13 @@ EDITORIAL REQUIREMENTS:
   evaluations when stronger public business exists.
 - Include the substantive MUST INCLUDE topics from the
   coverage plan.
+- Independently review the validated ACTION LEDGER as a
+  completeness backstop. A validated formal action involving a
+  budget amendment or appropriation, CAPER/CDBG action, contract,
+  agreement, lease, ordinance/resolution, grant, tax/fee, bond/loan,
+  or land-use/permit action must not be omitted from the body merely
+  because the coverage planner emphasized ceremonial material,
+  announcements, committee updates or discussion-only public comment.
 - A DISCUSSION ONLY topic can be covered if it matters,
   but clearly state that no council approval occurred.
 - Never imply approval when something was merely discussed.
