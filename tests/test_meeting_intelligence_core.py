@@ -34,6 +34,7 @@ from meeting_intelligence import (
     _turn_window_formal_finality_supported,
     _turn_window_topic_identity_span,
     parse_agenda_structure,
+    substantive_formal_agenda_items,
 )
 
 
@@ -658,3 +659,47 @@ Property Tax Allocation Correction was presented. Council adopted the resolution
     assert result is not None
     assert "Property Tax Allocation Correction" in result
     assert "adopted the resolution" in result
+
+
+
+def test_substantive_formal_agenda_items_catches_aliso_style_actions():
+    agenda = """
+    1. SPECIAL PRESENTATIONS
+    1.1 BUSINESS SPOTLIGHT - FS8 ALISO VIEJO
+    1.2 PROCLAMATION - HUNGER ACTION MONTH
+
+    4. CONSENT CALENDAR
+    4.1 WAIVE THE READING OF ALL ORDINANCES AND RESOLUTIONS
+    4.2 APPROVAL OF MINUTES
+    4.5 RESOLUTION REAPPROPRIATING CERTAIN FISCAL YEAR 2025-26 FUND BALANCES
+    AND AMENDING THE FISCAL YEAR 2026-27 BUDGET
+    4.7 ADOPTION OF THE 2025-2026 CONSOLIDATED ANNUAL PERFORMANCE AND
+    EVALUATION REPORT (CAPER) FOR EXPENDITURES OF COMMUNITY DEVELOPMENT
+    BLOCK GRANT (CDBG) FUNDS
+    4.8 PROPOSED LEASE RENEWAL WITH FAMILY ASSISTANCE MINISTRIES
+    """
+
+    candidates = substantive_formal_agenda_items(
+        agenda
+    )
+
+    assert [
+        item["item_number"]
+        for item in candidates
+    ] == [
+        "4.5",
+        "4.7",
+        "4.8",
+    ]
+
+    assert not any(
+        "BUSINESS SPOTLIGHT"
+        in item["title"]
+        for item in candidates
+    )
+
+    assert not any(
+        "APPROVAL OF MINUTES"
+        in item["title"]
+        for item in candidates
+    )
