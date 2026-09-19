@@ -44,7 +44,7 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
 
     def fake_get(url, **kwargs):
         calls.append((url, kwargs))
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             raise RuntimeError("agenda unavailable")
         assert url == (
             "https://city.test.granicus.com/MediaPlayer.php"
@@ -76,7 +76,7 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
 
 def test_failed_granicus_player_preserves_original_fetch_error(monkeypatch):
     def fake_get(url, **kwargs):
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             raise ValueError("agenda failure")
         raise RuntimeError("player failure")
 
@@ -208,7 +208,7 @@ def test_granicus_onbase_shell_uses_richer_media_player_text(monkeypatch):
 
     def fake_get(url, **kwargs):
         calls.append((url, kwargs))
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -240,7 +240,7 @@ def test_short_granicus_shell_fallback_keeps_original_when_player_is_shorter(
     player = "<html><body><p>short</p></body></html>"
 
     def fake_get(url, **kwargs):
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -262,7 +262,7 @@ def test_granicus_shell_player_failure_keeps_original_text(monkeypatch):
     shell = "<html><body><p>Original shell agenda text here.</p></body></html>"
 
     def fake_get(url, **kwargs):
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -337,7 +337,7 @@ def test_granicus_nonobvious_shell_over_old_threshold_uses_richer_player(
     def fake_get(url, **kwargs):
         calls.append(url)
 
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -368,7 +368,7 @@ def test_granicus_nonobvious_shell_over_old_threshold_uses_richer_player(
     assert "4.5 RESOLUTION REAPPROPRIATING" in text
     assert "4.7 ADOPTION OF THE CAPER" in text
     assert "4.8 PROPOSED LEASE RENEWAL" in text
-    assert len(calls) == 2
+    assert len(calls) == 3
 
 
 
@@ -412,7 +412,7 @@ def test_granicus_generated_agenda_wins_when_richer_than_other_views(
             url
         )
 
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={
