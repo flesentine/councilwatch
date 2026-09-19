@@ -309,3 +309,61 @@ def test_html_parse_failure_is_reported(monkeypatch):
     assert agenda.agenda_text("https://example.test/agenda") == (
         "[Agenda HTML parse failed: RuntimeError: parser exploded]"
     )
+
+
+
+def test_granicus_nonobvious_shell_over_old_threshold_uses_richer_player(
+    monkeypatch,
+):
+    shell = (
+        "<html><body>"
+        + "<p>Agenda navigation and meeting shell text.</p>" * 35
+        + "</body></html>"
+    )
+    player = (
+        "<html><body><h1>City Council Regular Meeting</h1>"
+        "<p>4.5 RESOLUTION REAPPROPRIATING FUND BALANCES "
+        "AND AMENDING THE BUDGET</p>"
+        "<p>4.7 ADOPTION OF THE CAPER FOR CDBG FUNDS</p>"
+        "<p>4.8 PROPOSED LEASE RENEWAL</p>"
+        + "<p>Indexed agenda detail.</p>" * 60
+        + "</body></html>"
+    )
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+
+        if "AgendaViewer.php" in url:
+            return FakeResponse(
+                text=shell,
+                headers={"content-type": "text/html"},
+                url=url,
+            )
+
+        assert "MediaPlayer.php" in url
+        return FakeResponse(
+            text=player,
+            headers={"content-type": "text/html"},
+            url=url,
+        )
+
+    monkeypatch.setattr(
+        agenda.requests,
+        "get",
+        fake_get,
+    )
+
+    text = agenda.agenda_text(
+        "https://city.test.granicus.com/AgendaViewer.php"
+        "?view_id=3&clip_id=788"
+    )
+
+    assert len(
+        "Agenda navigation and meeting shell text." * 35
+    ) > 1000
+    assert "4.5 RESOLUTION REAPPROPRIATING" in text
+    assert "4.7 ADOPTION OF THE CAPER" in text
+    assert "4.8 PROPOSED LEASE RENEWAL" in text
+    assert len(calls) == 2
