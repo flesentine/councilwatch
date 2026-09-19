@@ -423,3 +423,98 @@ def test_missing_substantive_formal_action_ignores_nontriggering_rows(action):
             ]
         },
     ) == []
+
+
+def test_missing_required_topic_does_not_count_shared_years_as_coverage():
+    story = make_story(
+        body=[
+            (
+                "The Council discussed a resolution reappropriating "
+                "Fiscal Year 2025-26 fund balances and amending the "
+                "Fiscal Year 2026-27 budget."
+            ),
+            "Officials also delivered routine reports and community updates.",
+        ]
+    )
+
+    intelligence = {
+        "coverage_items": [
+            {
+                "rank": 3,
+                "score": 6,
+                "must_include": True,
+                "topic": (
+                    "2025-2026 Consolidated Annual Performance and "
+                    "Evaluation Report (CAPER)"
+                ),
+            }
+        ],
+        "action_ledger": [
+            {
+                "topic": (
+                    "2025-2026 Consolidated Annual Performance and "
+                    "Evaluation Report (CAPER)"
+                ),
+                "agenda_title": (
+                    "ADOPTION OF THE 2025-2026 CONSOLIDATED ANNUAL "
+                    "PERFORMANCE AND EVALUATION REPORT (CAPER) FOR "
+                    "EXPENDITURES OF COMMUNITY DEVELOPMENT BLOCK "
+                    "GRANT (CDBG) FUNDS"
+                ),
+                "item_number": "4.7",
+                "action_status": "unclear",
+                "validated": True,
+            }
+        ],
+    }
+
+    issues = pc.missing_required_topic_issues(
+        story,
+        intelligence,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "material"
+    assert "agenda item 4.7" in issues[0].source_evidence
+
+
+def test_restore_required_topic_does_not_count_shared_years_as_coverage():
+    story = make_story(
+        body=[
+            (
+                "The Council discussed a resolution reappropriating "
+                "Fiscal Year 2025-26 fund balances and amending the "
+                "Fiscal Year 2026-27 budget."
+            )
+        ],
+        key_facts=[
+            (
+                "The Council discussed the 2025-2026 Consolidated "
+                "Annual Performance and Evaluation Report (CAPER)."
+            )
+        ],
+    )
+
+    intelligence = {
+        "coverage_items": [
+            {
+                "rank": 3,
+                "score": 6,
+                "must_include": True,
+                "topic": (
+                    "2025-2026 Consolidated Annual Performance and "
+                    "Evaluation Report (CAPER)"
+                ),
+            }
+        ],
+        "action_ledger": [],
+    }
+
+    assert pc.restore_required_topics_from_key_facts(
+        story,
+        intelligence,
+    )
+    assert any(
+        "CAPER" in paragraph
+        for paragraph in story.body
+    )
