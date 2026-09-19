@@ -44,12 +44,18 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
 
     def fake_get(url, **kwargs):
         calls.append((url, kwargs))
-        if "AgendaViewer.php" in url:
+
+        if "/AgendaViewer.php" in url:
             raise RuntimeError("agenda unavailable")
+
+        if "GeneratedAgendaViewer.php" in url:
+            raise RuntimeError("generated agenda unavailable")
+
         assert url == (
             "https://city.test.granicus.com/MediaPlayer.php"
             "?view_id=2&clip_id=981"
         )
+
         return FakeResponse(
             text=(
                 "<html><body><h1>City Council</h1>"
@@ -69,14 +75,17 @@ def test_failed_granicus_agenda_falls_back_to_media_player(monkeypatch):
     assert "City Council" in text
     assert "Item 6.1 School financing" in text
     assert "ignore me" not in text
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0][1]["allow_redirects"] is True
-    assert "allow_redirects" not in calls[1][1]
+    assert calls[1][1]["allow_redirects"] is True
+    assert calls[2][1]["allow_redirects"] is True
+    assert "MediaPlayer.php" in calls[1][0]
+    assert "GeneratedAgendaViewer.php" in calls[2][0]
 
 
 def test_failed_granicus_player_preserves_original_fetch_error(monkeypatch):
     def fake_get(url, **kwargs):
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             raise ValueError("agenda failure")
         raise RuntimeError("player failure")
 
@@ -208,7 +217,7 @@ def test_granicus_onbase_shell_uses_richer_media_player_text(monkeypatch):
 
     def fake_get(url, **kwargs):
         calls.append((url, kwargs))
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -227,8 +236,10 @@ def test_granicus_onbase_shell_uses_richer_media_player_text(monkeypatch):
     assert "City Council Regular Meeting" in text
     assert "Indexed agenda item" in text
     assert "OnBase Agenda Online" not in text
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[1][1]["allow_redirects"] is True
+    assert "MediaPlayer.php" in calls[1][0]
+    assert "GeneratedAgendaViewer.php" in calls[2][0]
 
 
 def test_short_granicus_shell_fallback_keeps_original_when_player_is_shorter(
@@ -238,7 +249,7 @@ def test_short_granicus_shell_fallback_keeps_original_when_player_is_shorter(
     player = "<html><body><p>short</p></body></html>"
 
     def fake_get(url, **kwargs):
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -260,7 +271,7 @@ def test_granicus_shell_player_failure_keeps_original_text(monkeypatch):
     shell = "<html><body><p>Original shell agenda text here.</p></body></html>"
 
     def fake_get(url, **kwargs):
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -335,7 +346,7 @@ def test_granicus_nonobvious_shell_over_old_threshold_uses_richer_player(
     def fake_get(url, **kwargs):
         calls.append(url)
 
-        if "AgendaViewer.php" in url:
+        if "/AgendaViewer.php" in url:
             return FakeResponse(
                 text=shell,
                 headers={"content-type": "text/html"},
@@ -366,4 +377,172 @@ def test_granicus_nonobvious_shell_over_old_threshold_uses_richer_player(
     assert "4.5 RESOLUTION REAPPROPRIATING" in text
     assert "4.7 ADOPTION OF THE CAPER" in text
     assert "4.8 PROPOSED LEASE RENEWAL" in text
-    assert len(calls) == 2
+    assert len(calls) == 3
+
+
+
+def test_granicus_generated_agenda_wins_when_richer_than_other_views(
+    monkeypatch,
+):
+    shell = (
+        "<html><body>"
+        "<p>Agenda navigation shell.</p>"
+        "</body></html>"
+    )
+
+    player = (
+        "<html><body>"
+        "<p>Meeting player with limited index.</p>"
+        "<p>4.8 PROPOSED LEASE RENEWAL</p>"
+        "</body></html>"
+    )
+
+    generated = (
+        "<html><body>"
+        "<h1>AGENDA</h1>"
+        "<p>STUDY SESSION FISCAL YEAR 2025-26 YEAR-END "
+        "RESULTS AND FIVE-YEAR FINANCIAL FORECAST</p>"
+        "<p>4.5 RESOLUTION REAPPROPRIATING CERTAIN "
+        "FISCAL YEAR 2025-26 FUND BALANCES AND AMENDING "
+        "THE FISCAL YEAR 2026-27 BUDGET</p>"
+        "<p>4.7 ADOPTION OF THE 2025-2026 CONSOLIDATED "
+        "ANNUAL PERFORMANCE AND EVALUATION REPORT (CAPER) "
+        "FOR EXPENDITURES OF COMMUNITY DEVELOPMENT BLOCK "
+        "GRANT (CDBG) FUNDS</p>"
+        "<p>4.8 PROPOSED LEASE RENEWAL WITH FAMILY "
+        "ASSISTANCE MINISTRIES</p>"
+        "</body></html>"
+    )
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(
+            url
+        )
+
+        if "/AgendaViewer.php" in url:
+            return FakeResponse(
+                text=shell,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        if "MediaPlayer.php" in url:
+            return FakeResponse(
+                text=player,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        if "GeneratedAgendaViewer.php" in url:
+            return FakeResponse(
+                text=generated,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        raise AssertionError(
+            url
+        )
+
+    monkeypatch.setattr(
+        agenda.requests,
+        "get",
+        fake_get,
+    )
+
+    text = agenda.agenda_text(
+        "https://city.test.granicus.com/AgendaViewer.php"
+        "?view_id=3&clip_id=788"
+    )
+
+    assert "FIVE-YEAR FINANCIAL FORECAST" in text
+    assert "4.5 RESOLUTION REAPPROPRIATING" in text
+    assert "4.7 ADOPTION OF THE 2025-2026" in text
+    assert "COMMUNITY DEVELOPMENT BLOCK" in text
+    assert "4.8 PROPOSED LEASE RENEWAL" in text
+    assert len(
+        calls
+    ) == 3
+
+
+
+def test_failed_granicus_primary_chooses_richest_alternate(
+    monkeypatch,
+):
+    player = (
+        "<html><body>"
+        "<p>4.8 PROPOSED LEASE RENEWAL</p>"
+        "</body></html>"
+    )
+
+    generated = (
+        "<html><body>"
+        "<p>4.5 RESOLUTION REAPPROPRIATING FUND BALANCES "
+        "AND AMENDING THE BUDGET</p>"
+        "<p>4.7 ADOPTION OF THE CAPER FOR CDBG FUNDS</p>"
+        "<p>4.8 PROPOSED LEASE RENEWAL</p>"
+        "</body></html>"
+    )
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(
+            url
+        )
+
+        if "/AgendaViewer.php" in url:
+            raise RuntimeError(
+                "primary unavailable"
+            )
+
+        if "MediaPlayer.php" in url:
+            return FakeResponse(
+                text=player,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        if "GeneratedAgendaViewer.php" in url:
+            return FakeResponse(
+                text=generated,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        raise AssertionError(
+            url
+        )
+
+    monkeypatch.setattr(
+        agenda.requests,
+        "get",
+        fake_get,
+    )
+
+    text = agenda.agenda_text(
+        "https://city.test.granicus.com/AgendaViewer.php"
+        "?view_id=3&clip_id=788"
+    )
+
+    assert "4.5 RESOLUTION REAPPROPRIATING" in text
+    assert "4.7 ADOPTION OF THE CAPER" in text
+    assert "4.8 PROPOSED LEASE RENEWAL" in text
+    assert len(calls) == 3

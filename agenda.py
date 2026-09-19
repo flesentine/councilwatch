@@ -11,6 +11,91 @@ UA = "Mozilla/5.0 CouncilWatchPrivateReview/0.3"
 HEADERS = {"User-Agent": UA}
 
 
+def _clean_html_text(raw_html: str) -> str:
+    soup = BeautifulSoup(
+        raw_html,
+        "html.parser",
+    )
+
+    for tag in soup(
+        ["script", "style", "noscript", "svg"]
+    ):
+        tag.decompose()
+
+    text = soup.get_text(
+        "\n",
+        strip=True,
+    )
+
+    return re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    ).strip()
+
+
+def _granicus_agenda_alternates(parsed):
+    if (
+        "granicus.com"
+        not in parsed.netloc.lower()
+        or not parsed.path.lower().endswith(
+            "/agendaviewer.php"
+        )
+    ):
+        return []
+
+    q = parse_qs(
+        parsed.query
+    )
+
+    view_id = (
+        q.get("view_id")
+        or [""]
+    )[0]
+
+    clip_id = (
+        q.get("clip_id")
+        or [""]
+    )[0]
+
+    if not clip_id:
+        return []
+
+    base = (
+        f"{parsed.scheme}://"
+        f"{parsed.netloc}"
+    )
+
+    query = (
+        f"?view_id={view_id}"
+        f"&clip_id={clip_id}"
+    )
+
+    return [
+        base
+        + "/MediaPlayer.php"
+        + query,
+        base
+        + "/GeneratedAgendaViewer.php"
+        + query,
+    ]
+
+
+def _fetch_html_text(url: str) -> str:
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30,
+        allow_redirects=True,
+    )
+
+    response.raise_for_status()
+
+    return _clean_html_text(
+        response.text
+    )
+
+
 def agenda_text(url: str, limit: int = 50000) -> str:
     if not url:
         return ""
@@ -24,55 +109,43 @@ def agenda_text(url: str, limit: int = 50000) -> str:
         r.raise_for_status()
 
     except Exception as exc:
-        parsed = urlparse(url)
+        parsed = urlparse(
+            url
+        )
 
-        if (
-            "granicus.com" in parsed.netloc.lower()
-            and parsed.path.lower().endswith("/agendaviewer.php")
+        best_alternate = ""
+
+        for alternate_url in (
+            _granicus_agenda_alternates(
+                parsed
+            )
         ):
-            q = parse_qs(parsed.query)
-
-            view_id = (q.get("view_id") or [""])[0]
-            clip_id = (q.get("clip_id") or [""])[0]
-
-            if clip_id:
-                player_url = (
-                    f"{parsed.scheme}://{parsed.netloc}"
-                    f"/MediaPlayer.php"
-                    f"?view_id={view_id}&clip_id={clip_id}"
+            try:
+                alternate_text = (
+                    _fetch_html_text(
+                        alternate_url
+                    )
                 )
 
-                try:
-                    pr = requests.get(
-                        player_url,
-                        headers=HEADERS,
-                        timeout=30,
+                if (
+                    len(
+                        alternate_text
                     )
-                    pr.raise_for_status()
-
-                    soup = BeautifulSoup(
-                        pr.text,
-                        "html.parser",
+                    > len(
+                        best_alternate
                     )
-
-                    for tag in soup(
-                        ["script", "style", "noscript", "svg"]
-                    ):
-                        tag.decompose()
-
-                    player_text = soup.get_text(
-                        "\n",
-                        strip=True,
+                ):
+                    best_alternate = (
+                        alternate_text
                     )
 
-                    return re.sub(
-                        r"\n{3,}",
-                        "\n\n",
-                        player_text,
-                    ).strip()[:limit]
+            except Exception:
+                continue
 
-                except Exception:
-                    pass
+        if best_alternate:
+            return best_alternate[
+                :limit
+            ]
 
         return (
             f"[Agenda fetch failed: "
@@ -89,80 +162,44 @@ def agenda_text(url: str, limit: int = 50000) -> str:
             return f"[Agenda PDF parse failed: {type(exc).__name__}: {exc}]"
 
     try:
-        soup = BeautifulSoup(r.text, "html.parser")
-        for tag in soup(["script", "style", "noscript", "svg"]):
-            tag.decompose()
-
-        text = soup.get_text("\n", strip=True)
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-
-        # Some Granicus AgendaViewer pages redirect into a tiny
-        # OnBase shell containing navigation but no actual agenda.
-        # In that case, use the matching official MediaPlayer page,
-        # which exposes the meeting's indexed agenda items.
-        parsed = urlparse(url)
-
-        is_granicus_agenda = (
-            "granicus.com" in parsed.netloc.lower()
-            and parsed.path.lower().endswith("/agendaviewer.php")
+        text = _clean_html_text(
+            r.text
         )
 
-        # Granicus AgendaViewer pages vary by deployment. Some
-        # return a full agenda, while others return an OnBase shell
-        # that can be just over an arbitrary length threshold.
-        #
-        # The matching official MediaPlayer page often exposes the
-        # meeting's indexed agenda items directly. Always compare the
-        # two official representations and keep the richer text rather
-        # than trying to guess whether AgendaViewer is a shell.
-        if is_granicus_agenda:
-            q = parse_qs(parsed.query)
+        parsed = urlparse(
+            url
+        )
 
-            view_id = (q.get("view_id") or [""])[0]
-            clip_id = (q.get("clip_id") or [""])[0]
-
-            if clip_id:
-                player_url = (
-                    f"{parsed.scheme}://{parsed.netloc}"
-                    f"/MediaPlayer.php"
-                    f"?view_id={view_id}&clip_id={clip_id}"
+        # Granicus deployments can expose different amounts of
+        # meeting material through AgendaViewer, MediaPlayer and
+        # GeneratedAgendaViewer. All three are official Granicus
+        # representations of the same clip. Compare them and keep
+        # the richest text instead of relying on a page-length
+        # heuristic or assuming MediaPlayer is always complete.
+        for alternate_url in (
+            _granicus_agenda_alternates(
+                parsed
+            )
+        ):
+            try:
+                alternate_text = (
+                    _fetch_html_text(
+                        alternate_url
+                    )
                 )
 
-                try:
-                    pr = requests.get(
-                        player_url,
-                        headers=HEADERS,
-                        timeout=30,
-                        allow_redirects=True,
+                if (
+                    len(
+                        alternate_text
                     )
-                    pr.raise_for_status()
-
-                    psoup = BeautifulSoup(
-                        pr.text,
-                        "html.parser",
+                    > len(
+                        text
                     )
+                ):
+                    text = alternate_text
 
-                    for tag in psoup(
-                        ["script", "style", "noscript", "svg"]
-                    ):
-                        tag.decompose()
-
-                    player_text = psoup.get_text(
-                        "\n",
-                        strip=True,
-                    )
-
-                    player_text = re.sub(
-                        r"\n{3,}",
-                        "\n\n",
-                        player_text,
-                    ).strip()
-
-                    if len(player_text) > len(text):
-                        text = player_text
-
-                except Exception:
-                    pass
+            except Exception:
+                continue
 
         return text[:limit]
     except Exception as exc:
