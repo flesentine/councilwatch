@@ -518,3 +518,213 @@ def test_restore_required_topic_does_not_count_shared_years_as_coverage():
         "CAPER" in paragraph
         for paragraph in story.body
     )
+
+
+def test_missing_required_budget_not_satisfied_by_generic_fiscal_year_overlap():
+    story = make_story(
+        body=[
+            (
+                "The Council held a study session on fiscal year "
+                "2025-26 year-end financial results and a five-year "
+                "financial forecast."
+            )
+        ]
+    )
+
+    intelligence = {
+        "coverage_items": [
+            {
+                "rank": 2,
+                "score": 7,
+                "must_include": True,
+                "topic": (
+                    "Fiscal Year 2025-26 Fund Balance "
+                    "Reappropriation and Budget Amendment"
+                ),
+            }
+        ],
+        "action_ledger": [
+            {
+                "topic": (
+                    "Fiscal Year 2025-26 Fund Balance "
+                    "Reappropriation and Budget Amendment"
+                ),
+                "agenda_title": (
+                    "RESOLUTION REAPPROPRIATING CERTAIN FISCAL YEAR "
+                    "2025-26 FUND BALANCES AND AMENDING THE FISCAL "
+                    "YEAR 2026-27 BUDGET"
+                ),
+                "item_number": "4.5",
+                "action_status": "discussed",
+                "validated": True,
+            }
+        ],
+    }
+
+    issues = pc.missing_required_topic_issues(
+        story,
+        intelligence,
+    )
+
+    assert len(issues) == 1
+    assert "agenda item 4.5" in issues[0].source_evidence
+
+
+def test_restore_required_budget_ignores_generic_fiscal_year_overlap():
+    story = make_story(
+        body=[
+            (
+                "The Council held a study session on fiscal year "
+                "2025-26 year-end financial results and a five-year "
+                "financial forecast."
+            )
+        ]
+    )
+
+    intelligence = {
+        "coverage_items": [
+            {
+                "rank": 2,
+                "score": 7,
+                "must_include": True,
+                "topic": (
+                    "Fiscal Year 2025-26 Fund Balance "
+                    "Reappropriation and Budget Amendment"
+                ),
+            }
+        ],
+        "action_ledger": [
+            {
+                "topic": (
+                    "Fiscal Year 2025-26 Fund Balance "
+                    "Reappropriation and Budget Amendment"
+                ),
+                "agenda_title": (
+                    "RESOLUTION REAPPROPRIATING CERTAIN FISCAL YEAR "
+                    "2025-26 FUND BALANCES AND AMENDING THE FISCAL "
+                    "YEAR 2026-27 BUDGET"
+                ),
+                "item_number": "4.5",
+                "agenda_section": "CONSENT CALENDAR",
+                "action_status": "discussed",
+                "validated": True,
+            }
+        ],
+    }
+
+    assert pc.restore_required_topics_from_key_facts(
+        story,
+        intelligence,
+    )
+
+    assert any(
+        "reappropriation" in paragraph.lower()
+        and "budget" in paragraph.lower()
+        for paragraph in story.body
+    )
+
+
+def test_private_address_redaction_targets_linked_lease_only():
+    story = make_story(
+        headline="Council directs lease privacy action",
+        body=[
+            (
+                "The Council directed a lease renewal for the "
+                "property at 35 Playa Circle and directed staff "
+                "to remove the specific address from public documents."
+            ),
+            (
+                "The Council also reviewed a permit application "
+                "at 27412 Aliso Creek Road."
+            ),
+        ],
+        key_facts=[
+            "Lease property: 35 Playa Circle.",
+            "Permit property: 27412 Aliso Creek Road.",
+        ],
+    )
+
+    intelligence = {
+        "action_ledger": [
+            {
+                "topic": (
+                    "Lease Renewal and Privacy Directive for "
+                    "Affordable Housing Unit"
+                ),
+                "agenda_title": "",
+                "action_status": "directed",
+                "validated": True,
+                "evidence_quote": (
+                    "The Council directed staff to remove the address "
+                    "for 35 Playa Circle from public documents."
+                ),
+            },
+            {
+                "topic": (
+                    "Lease Renewal with Family Assistance Ministries"
+                ),
+                "agenda_title": (
+                    "PROPOSED LEASE RENEWAL WITH FAMILY ASSISTANCE "
+                    "MINISTRIES FOR 35 PLAYA CIRCLE"
+                ),
+                "item_number": "4.8",
+                "action_status": "discussed",
+                "validated": True,
+            },
+            {
+                "topic": "Outpatient Medical Office Permit",
+                "agenda_title": (
+                    "CONDITIONAL USE PERMIT AT "
+                    "27412 ALISO CREEK ROAD"
+                ),
+                "item_number": "4.6",
+                "action_status": "unclear",
+                "validated": True,
+            },
+        ]
+    }
+
+    assert pc.redact_validated_private_addresses(
+        story,
+        intelligence,
+    )
+
+    public = " ".join(
+        [
+            story.headline,
+            story.dek,
+            *story.body,
+            *story.key_facts,
+        ]
+    )
+
+    assert "35 Playa Circle" not in public
+    assert "27412 Aliso Creek Road" in public
+    assert "property at the property" not in public.lower()
+
+
+def test_private_address_redaction_requires_validated_privacy_directive():
+    story = make_story(
+        body=[
+            "The lease property is at 35 Playa Circle."
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            {
+                "topic": "Lease Renewal Privacy Directive",
+                "action_status": "directed",
+                "validated": False,
+                "evidence_quote": (
+                    "Remove the address for 35 Playa Circle."
+                ),
+            }
+        ]
+    }
+
+    assert not pc.redact_validated_private_addresses(
+        story,
+        intelligence,
+    )
+    assert "35 Playa Circle" in story.body[0]
