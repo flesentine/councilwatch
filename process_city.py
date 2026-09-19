@@ -3159,6 +3159,7 @@ def missing_required_topic_issues(
             )
             if (
                 len(word) >= 4
+                and not word.isdigit()
                 and word not in stopwords
             )
         }
@@ -3339,6 +3340,7 @@ def restore_required_topics_from_key_facts(
             )
             if (
                 len(word) >= 4
+                and not word.isdigit()
                 and word not in stopwords
             )
         }
