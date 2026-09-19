@@ -465,3 +465,75 @@ def test_granicus_generated_agenda_wins_when_richer_than_other_views(
     assert len(
         calls
     ) == 3
+
+
+
+def test_failed_granicus_primary_chooses_richest_alternate(
+    monkeypatch,
+):
+    player = (
+        "<html><body>"
+        "<p>4.8 PROPOSED LEASE RENEWAL</p>"
+        "</body></html>"
+    )
+
+    generated = (
+        "<html><body>"
+        "<p>4.5 RESOLUTION REAPPROPRIATING FUND BALANCES "
+        "AND AMENDING THE BUDGET</p>"
+        "<p>4.7 ADOPTION OF THE CAPER FOR CDBG FUNDS</p>"
+        "<p>4.8 PROPOSED LEASE RENEWAL</p>"
+        "</body></html>"
+    )
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(
+            url
+        )
+
+        if "/AgendaViewer.php" in url:
+            raise RuntimeError(
+                "primary unavailable"
+            )
+
+        if "MediaPlayer.php" in url:
+            return FakeResponse(
+                text=player,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        if "GeneratedAgendaViewer.php" in url:
+            return FakeResponse(
+                text=generated,
+                headers={
+                    "content-type":
+                        "text/html"
+                },
+                url=url,
+            )
+
+        raise AssertionError(
+            url
+        )
+
+    monkeypatch.setattr(
+        agenda.requests,
+        "get",
+        fake_get,
+    )
+
+    text = agenda.agenda_text(
+        "https://city.test.granicus.com/AgendaViewer.php"
+        "?view_id=3&clip_id=788"
+    )
+
+    assert "4.5 RESOLUTION REAPPROPRIATING" in text
+    assert "4.7 ADOPTION OF THE CAPER" in text
+    assert "4.8 PROPOSED LEASE RENEWAL" in text
+    assert len(calls) == 3
