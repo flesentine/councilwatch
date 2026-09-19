@@ -193,3 +193,147 @@ def test_story_failover_tries_all_configured_models(monkeypatch):
         ("fallback-a", False),
         ("fallback-b", False),
     ]
+
+
+def test_forced_failover_invalidates_stale_intelligence_cache(
+    tmp_path,
+    monkeypatch,
+):
+    _set_models(
+        monkeypatch,
+        "primary",
+        ["fallback-a"],
+    )
+
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+
+    stale = (
+        drafts
+        / "laguna-niguel--meeting-1.intelligence.json"
+    )
+    stale.write_text(
+        '{"coverage_items": [{"topic": "STALE"}]}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        generate_five,
+        "DRAFTS",
+        drafts,
+    )
+
+    calls = []
+
+    def fake_process_city(
+        slug,
+        *,
+        force_story,
+        force_notes,
+        meeting_override,
+    ):
+        calls.append(
+            (
+                force_notes,
+                stale.exists(),
+            )
+        )
+
+        if len(calls) == 1:
+            raise RuntimeError(
+                "503 UNAVAILABLE: model high demand"
+            )
+
+        assert stale.exists() is False
+
+        return "ok"
+
+    monkeypatch.setattr(
+        generate_five,
+        "process_city",
+        fake_process_city,
+    )
+
+    result = generate_five.process_city_with_story_failover(
+        "laguna-niguel",
+        MEETING,
+        force_story=True,
+        force_notes=True,
+    )
+
+    assert result == "ok"
+    assert calls == [
+        (True, False),
+        (False, False),
+    ]
+
+
+def test_nonforced_failover_preserves_existing_intelligence_cache(
+    tmp_path,
+    monkeypatch,
+):
+    _set_models(
+        monkeypatch,
+        "primary",
+        ["fallback-a"],
+    )
+
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+
+    cached = (
+        drafts
+        / "laguna-niguel--meeting-1.intelligence.json"
+    )
+    cached.write_text(
+        '{"coverage_items": [{"topic": "KEEP"}]}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        generate_five,
+        "DRAFTS",
+        drafts,
+    )
+
+    calls = []
+
+    def fake_process_city(
+        slug,
+        *,
+        force_story,
+        force_notes,
+        meeting_override,
+    ):
+        calls.append(
+            (
+                force_notes,
+                cached.exists(),
+            )
+        )
+
+        if len(calls) == 1:
+            raise RuntimeError(
+                "503 UNAVAILABLE: model high demand"
+            )
+
+        return "ok"
+
+    monkeypatch.setattr(
+        generate_five,
+        "process_city",
+        fake_process_city,
+    )
+
+    result = generate_five.process_city_with_story_failover(
+        "laguna-niguel",
+        MEETING,
+        force_story=True,
+        force_notes=False,
+    )
+
+    assert result == "ok"
+    assert calls == [
+        (False, True),
+        (False, True),
+    ]
