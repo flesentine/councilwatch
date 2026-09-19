@@ -313,3 +313,113 @@ def test_formal_status_normalizer_preserves_shared_only_cues():
     original = list(story.body)
     assert not pc.normalize_validated_formal_status_language(story, intelligence)
     assert story.body == original
+
+
+def test_missing_substantive_formal_action_flags_validated_budget_omission():
+    story = make_story(
+        body=[
+            "The council recognized a local business and announced community events."
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            {
+                "topic": "FY 2026-27 Budget Reappropriation",
+                "agenda_title": (
+                    "RESOLUTION REAPPROPRIATING CERTAIN FISCAL YEAR "
+                    "2025-26 FUND BALANCES AND AMENDING THE FISCAL "
+                    "YEAR 2026-27 BUDGET"
+                ),
+                "item_number": "4.5",
+                "agenda_section": "CONSENT CALENDAR",
+                "action_status": "adopted",
+                "validated": True,
+                "evidence_quote": (
+                    "Motion to approve the consent calendar passed 4-0."
+                ),
+            }
+        ]
+    }
+
+    issues = pc.missing_substantive_formal_action_issues(
+        story,
+        intelligence,
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "material"
+    assert issues[0].field == "body"
+    assert "agenda item 4.5" in issues[0].source_evidence
+
+
+def test_missing_substantive_formal_action_accepts_covered_budget_action():
+    story = make_story(
+        body=[
+            (
+                "The council adopted a resolution reappropriating "
+                "Fiscal Year 2025-26 fund balances and amending the "
+                "Fiscal Year 2026-27 budget."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            {
+                "topic": "FY 2026-27 Budget Reappropriation",
+                "agenda_title": (
+                    "RESOLUTION REAPPROPRIATING CERTAIN FISCAL YEAR "
+                    "2025-26 FUND BALANCES AND AMENDING THE FISCAL "
+                    "YEAR 2026-27 BUDGET"
+                ),
+                "item_number": "4.5",
+                "agenda_section": "CONSENT CALENDAR",
+                "action_status": "adopted",
+                "validated": True,
+            }
+        ]
+    }
+
+    assert pc.missing_substantive_formal_action_issues(
+        story,
+        intelligence,
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {
+            "topic": "Hunger Action Month Proclamation",
+            "agenda_title": "PROCLAMATION - HUNGER ACTION MONTH",
+            "action_status": "accepted",
+            "validated": True,
+        },
+        {
+            "topic": "FY 2026-27 Budget Reappropriation",
+            "agenda_title": "BUDGET REAPPROPRIATION",
+            "action_status": "unclear",
+            "validated": True,
+        },
+        {
+            "topic": "FY 2026-27 Budget Reappropriation",
+            "agenda_title": "BUDGET REAPPROPRIATION",
+            "action_status": "adopted",
+            "validated": False,
+        },
+    ],
+)
+def test_missing_substantive_formal_action_ignores_nontriggering_rows(action):
+    story = make_story(
+        body=["The council meeting included several updates."]
+    )
+
+    assert pc.missing_substantive_formal_action_issues(
+        story,
+        {
+            "action_ledger": [
+                action
+            ]
+        },
+    ) == []

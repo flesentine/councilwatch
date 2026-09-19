@@ -2892,6 +2892,231 @@ def normalize_validated_action_language(
     return changed
 
 
+def missing_substantive_formal_action_issues(
+    story,
+    intelligence,
+):
+    """
+    Fail closed when a validated substantive formal agenda action is
+    absent from the finished article body.
+
+    This backstops coverage-model ranking. It does not infer that an
+    agenda recommendation passed; only validated action-ledger rows
+    can trigger the gate.
+    """
+
+    formal_statuses = {
+        "approved",
+        "adopted",
+        "authorized",
+        "awarded",
+        "directed",
+        "rejected",
+        "denied",
+        "appointed",
+        "accepted",
+        "passed",
+    }
+
+    substantive_pattern = re.compile(
+        r"\b(?:"
+        r"budget|appropriat(?:e|ion|ed|ing)?|reappropriat\w*|"
+        r"caper|community\s+development\s+block\s+grant|cdbg|"
+        r"ordinance|resolution|"
+        r"contract|agreement|lease|"
+        r"grant|tax|fee|bond|loan|"
+        r"zoning|land\s+use|development\s+agreement|"
+        r"conditional\s+use\s+permit|exception\s+permit|permit|"
+        r"award|purchase|acquisition|"
+        r"capital\s+improvement"
+        r")\b",
+        re.I,
+    )
+
+    routine_pattern = re.compile(
+        r"\b(?:"
+        r"waive\s+the\s+reading|"
+        r"approval\s+of\s+minutes|"
+        r"treasurer(?:'|’)?s\s+statement|"
+        r"business\s+spotlight|business\s+of\s+the\s+month|"
+        r"proclamation|recognition"
+        r")\b",
+        re.I,
+    )
+
+    stopwords = {
+        "and",
+        "the",
+        "for",
+        "with",
+        "from",
+        "into",
+        "city",
+        "council",
+        "annual",
+        "program",
+        "update",
+        "amendment",
+        "amendments",
+        "approval",
+        "approve",
+        "approved",
+        "adoption",
+        "adopt",
+        "adopted",
+        "resolution",
+        "agreement",
+    }
+
+    def words(value):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(value or "").lower(),
+            )
+            if (
+                len(word) >= 4
+                and word not in stopwords
+            )
+        }
+
+    paragraphs = [
+        str(paragraph or "")
+        for paragraph in story.body
+        if str(paragraph or "").strip()
+    ]
+
+    issues = []
+
+    for action in intelligence.get(
+        "action_ledger",
+        [],
+    ):
+        if action.get(
+            "validated"
+        ) is not True:
+            continue
+
+        status = str(
+            action.get(
+                "action_status",
+                "",
+            )
+        ).strip().lower()
+
+        if status not in formal_statuses:
+            continue
+
+        topic = str(
+            action.get(
+                "topic",
+                "",
+            )
+        ).strip()
+
+        agenda_title = str(
+            action.get(
+                "agenda_title",
+                "",
+            )
+        ).strip()
+
+        combined = (
+            topic
+            + " "
+            + agenda_title
+        ).strip()
+
+        if not substantive_pattern.search(
+            combined
+        ):
+            continue
+
+        if routine_pattern.search(
+            combined
+        ):
+            continue
+
+        anchors = words(
+            combined
+        )
+
+        if len(
+            anchors
+        ) < 2:
+            continue
+
+        if any(
+            len(
+                anchors
+                & words(
+                    paragraph
+                )
+            ) >= 2
+            for paragraph in paragraphs
+        ):
+            continue
+
+        item_number = str(
+            action.get(
+                "item_number",
+                "",
+            )
+        ).strip()
+
+        evidence_quote = str(
+            action.get(
+                "evidence_quote",
+                "",
+            )
+        ).strip()
+
+        source_evidence = (
+            "The validated action ledger"
+            + (
+                f" for agenda item {item_number}"
+                if item_number
+                else ""
+            )
+            + (
+                f" records a substantive formal action as {status}."
+                if status
+                else " records a substantive formal action."
+            )
+        )
+
+        if evidence_quote:
+            source_evidence += (
+                " Validated evidence: "
+                + evidence_quote
+            )
+
+        issues.append(
+            AuditIssue(
+                severity="material",
+                field="body",
+                draft_text=(
+                    topic
+                    or agenda_title
+                    or "Substantive formal agenda action"
+                ),
+                source_evidence=source_evidence,
+                correction=(
+                    "Add a source-supported body paragraph covering "
+                    "this validated substantive formal action. Do not "
+                    "allow ceremonial material, announcements, committee "
+                    "updates or discussion-only public comment to crowd "
+                    "out validated budget, fiscal, CDBG/CAPER, contract, "
+                    "lease, ordinance/resolution, grant, tax/fee, bond/"
+                    "loan, or land-use/permit actions."
+                ),
+            )
+        )
+
+    return issues
+
+
 def missing_required_topic_issues(
     story,
     intelligence,
@@ -4058,6 +4283,13 @@ def process_city(
             unsupported_conduit_financing_story_issues(
                 story,
                 agenda,
+            )
+        )
+
+        deterministic_action_issues.extend(
+            missing_substantive_formal_action_issues(
+                story,
+                intelligence,
             )
         )
 
