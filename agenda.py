@@ -107,15 +107,15 @@ def agenda_text(url: str, limit: int = 50000) -> str:
             and parsed.path.lower().endswith("/agendaviewer.php")
         )
 
-        looks_like_shell = (
-            len(text) < 1000
-            or (
-                "OnBase Agenda Online" in text
-                and "Agenda Packet" in text
-            )
-        )
-
-        if is_granicus_agenda and looks_like_shell:
+        # Granicus AgendaViewer pages vary by deployment. Some
+        # return a full agenda, while others return an OnBase shell
+        # that can be just over an arbitrary length threshold.
+        #
+        # The matching official MediaPlayer page often exposes the
+        # meeting's indexed agenda items directly. Always compare the
+        # two official representations and keep the richer text rather
+        # than trying to guess whether AgendaViewer is a shell.
+        if is_granicus_agenda:
             q = parse_qs(parsed.query)
 
             view_id = (q.get("view_id") or [""])[0]
