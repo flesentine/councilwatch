@@ -4485,12 +4485,6 @@ def process_city(
                 ):
                     changed = True
 
-                if redact_validated_private_addresses(
-                    story,
-                    intelligence,
-                ):
-                    changed = True
-
             if changed:
                 print(
                     "  Corrections applied; "
@@ -4566,6 +4560,12 @@ def process_city(
                     changed = True
 
                 if restore_required_topics_from_key_facts(
+                    story,
+                    intelligence,
+                ):
+                    changed = True
+
+                if redact_validated_private_addresses(
                     story,
                     intelligence,
                 ):
