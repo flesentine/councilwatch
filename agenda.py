@@ -113,6 +113,8 @@ def agenda_text(url: str, limit: int = 50000) -> str:
             url
         )
 
+        best_alternate = ""
+
         for alternate_url in (
             _granicus_agenda_alternates(
                 parsed
@@ -125,13 +127,25 @@ def agenda_text(url: str, limit: int = 50000) -> str:
                     )
                 )
 
-                if alternate_text:
-                    return alternate_text[
-                        :limit
-                    ]
+                if (
+                    len(
+                        alternate_text
+                    )
+                    > len(
+                        best_alternate
+                    )
+                ):
+                    best_alternate = (
+                        alternate_text
+                    )
 
             except Exception:
                 continue
+
+        if best_alternate:
+            return best_alternate[
+                :limit
+            ]
 
         return (
             f"[Agenda fetch failed: "
