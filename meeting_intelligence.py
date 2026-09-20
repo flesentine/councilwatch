@@ -9866,4 +9866,4 @@ NON-NEGOTIABLE RULES:
         )
     )
 
-    return final_story\n
+    return final_story
