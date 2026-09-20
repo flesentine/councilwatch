@@ -61,6 +61,57 @@ def test_local_staff_followup_rejects_public_comment_response_rules():
     ) is None
 
 
+def test_local_topic_anchor_rejects_generic_public_comment_boilerplate_for_measure():
+    candidate = (
+        "At this time the city council will consider public matters. "
+        "If you wish to speak under public comment, submit a speaker card. "
+        "Staff will only respond to questions from the city council."
+    )
+
+    from meeting_intelligence import _local_topic_anchor_supported
+
+    assert not _local_topic_anchor_supported(
+        "Measure F Term Limits Discussion and Public Comment",
+        candidate,
+    )
+
+
+def test_staff_followup_response_requires_clause_local_request():
+    assert not _staff_followup_language_supported(
+        (
+            "Please address comments to the city council. "
+            "Staff will only respond to questions from the city council."
+        )
+    )
+
+    assert _staff_followup_language_supported(
+        "The council asked staff to respond to the resident's concern."
+    )
+
+
+def test_local_staff_followup_rejects_measure_f_procedural_boilerplate():
+    notes = _raw_transcript(
+        (
+            "At this time, the city council will convene to consider public "
+            "matters. If you wish to speak, please fill out a speaker card. "
+            "Please address your comments to the city council. Staff will only "
+            "respond to questions from the city council, not public speakers."
+        ),
+        "The invocation was presented.",
+        "Public comments are now open.",
+        (
+            "A resident discussed Measure F term limits and opposed the "
+            "proposal."
+        ),
+        "Public comments are now closed.",
+    )
+
+    assert _best_supported_local_staff_followup_quote(
+        "Measure F Term Limits Discussion and Public Comment",
+        notes,
+    ) is None
+
+
 def test_local_public_comment_recovers_exact_commenter_turn_only_while_open():
     notes = _raw_transcript(
         "Mayor: We will now move on to public comments.",
