@@ -9208,6 +9208,47 @@ def writer_context(
     return "\n".join(lines)
 
 
+def public_copy_naming_rules():
+    """
+    Reusable source-discipline rules for named government reports,
+    programs and ballot measures.
+
+    These rules intentionally constrain wording rather than adding
+    outside facts. Official source material controls the canonical
+    identity; public comment can establish what a speaker said about
+    one component but cannot redefine the whole measure/report.
+    """
+    return """
+OFFICIAL-NAME AND BALLOT-SCOPE RULES:
+
+- For a formally named government report, plan, program, ordinance,
+  resolution, agreement or ballot measure, prefer the official
+  source name or a faithful shortening that preserves its core
+  identity and scope.
+- Do not invent a broader or more colorful substitute name in the
+  headline or dek. For example, do not turn a named CDBG performance
+  report into a generic "federal housing and infrastructure report"
+  merely because housing and infrastructure expenditures appear
+  inside the report.
+- When an official acronym is established by the supplied source,
+  a concise form using that acronym is acceptable if it remains
+  faithful to the official identity.
+- For ballot measures, use the official measure letter/name when
+  the supplied official material provides it.
+- Do not characterize an entire ballot measure as being only about
+  one component unless the supplied official source explicitly
+  establishes that scope.
+- If public commenters describe or criticize one provision of a
+  broader ballot measure, attribute that narrower description to
+  the speakers. Example: "speakers criticized Measure F's proposed
+  term-limit changes" is safer than independently declaring that
+  "Measure F is a term-limit measure" unless the official source
+  itself says so.
+- Public comment is evidence of what the speaker said, not
+  independent evidence of a ballot measure's full legal scope.
+""".strip()
+
+
 def deterministic_verification_notes(intelligence):
     """
     Verification notes are generated from the verifier's actual
@@ -9277,6 +9318,8 @@ commitment, motive, or technical relationship.
 
 Factual claims must come from the recording-derived notes or
 official agenda material.
+
+{public_copy_naming_rules()}
 
 EDITORIAL REQUIREMENTS:
 
@@ -9530,6 +9573,8 @@ NON-NEGOTIABLE EDITORIAL RULES:
     evidence explicitly makes the City the borrower, obligor,
     debtor, guarantor, or otherwise financially liable.
 
+{public_copy_naming_rules()}
+
 ================ COVERAGE PLAN ================
 
 {context}
@@ -9631,7 +9676,10 @@ REQUIREMENTS:
   the borrower, obligor, debtor, guarantor, or financially liable.
 - Use ONLY the evidence supplied below.
 - Do not invent quotes, facts, names, motives, or background.
+- Apply the official-name and ballot-scope rules below.
 - Do not add generic filler simply to increase length.
+
+{public_copy_naming_rules()}
 - Normal target: approximately 600-850 words.
 - Preserve concise newspaper-style paragraphs.
 
@@ -9881,6 +9929,8 @@ NON-NEGOTIABLE RULES:
     mechanical transitions and needless restatement.
     Preserve all useful supported facts.
     Do not add facts merely to improve prose.
+
+{public_copy_naming_rules()}
 
 ================ CURRENT ARTICLE ================
 
