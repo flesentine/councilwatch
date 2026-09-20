@@ -1444,6 +1444,51 @@ def normalize_validated_formal_status_language(
                 )
             )
 
+            observed_status = (
+                word_to_status.get(
+                    verb.lower()
+                )
+            )
+
+            # Preserve the existing narrow embedded-effect rule:
+            # an ADOPTED resolution that explicitly provides for
+            # APPOINTMENT may correctly be described as appointing
+            # the officeholders. Do not rewrite that local verb to
+            # the syntactically wrong "adopted the commissioners."
+            if (
+                local_status == "adopted"
+                and observed_status == "appointed"
+            ):
+                embedded_appointment = False
+
+                for action, _ in local_matches:
+                    identity = (
+                        str(
+                            action.get(
+                                "agenda_title",
+                                "",
+                            )
+                        )
+                        + " "
+                        + str(
+                            action.get(
+                                "topic",
+                                "",
+                            )
+                        )
+                    )
+
+                    if re.search(
+                        r"\bappoint(?:ed|ing|ment|ments)?\b",
+                        identity,
+                        re.I,
+                    ):
+                        embedded_appointment = True
+                        break
+
+                if embedded_appointment:
+                    continue
+
             replacement = (
                 noncanonical_replacement_word(
                     verb,
@@ -3141,18 +3186,17 @@ def enforce_publishable_person_names(
             ] = canonical
 
     role_pattern = re.compile(
-        r"\b(?P<role>"
+        r"\b(?P<role>(?i:"
         r"council\s+member|"
         r"councilmember|"
         r"mayor\s+pro\s+tem|"
         r"vice\s+mayor|"
         r"mayor"
-        r")\s+"
+        r"))\s+"
         r"(?P<name>"
         r"[A-Z][A-Za-z'’\-]*"
         r"(?:\s+[A-Z][A-Za-z'’\-]*)?"
-        r")\b",
-        re.I,
+        r")\b"
     )
 
     def generic_role(
