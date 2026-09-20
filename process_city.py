@@ -3414,6 +3414,121 @@ def enforce_publishable_person_names(
 
 
 
+def normalize_validated_warrant_register_name(
+    story,
+    intelligence,
+):
+    """
+    Keep reader-facing shorthand for a validated warrant-register
+    action faithful to the official/action-ledger identity.
+
+    A model may paraphrase "warrant register" as "financial
+    warrants". When a validated formal action explicitly establishes
+    a warrant-register item, canonicalize only that narrow shorthand.
+    """
+    supported = any(
+        (
+            action.get("validated") is True
+            and not action.get(
+                "agenda_linkage_conflict"
+            )
+            and str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            in ACTION_FORMAL_STATUSES
+            and re.search(
+                r"\bwarrant\s+register\b",
+                " ".join(
+                    str(
+                        action.get(
+                            field,
+                            "",
+                        )
+                        or ""
+                    )
+                    for field in (
+                        "topic",
+                        "agenda_title",
+                    )
+                ),
+                re.I,
+            )
+        )
+        for action in intelligence.get(
+            "action_ledger",
+            [],
+        )
+    )
+
+    if not supported:
+        return False
+
+    pattern = re.compile(
+        r"\bfinancial\s+warrants?\b",
+        re.I,
+    )
+
+    def scrub(value):
+        return pattern.sub(
+            "warrant register",
+            str(
+                value or ""
+            ),
+        )
+
+    changed = False
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    new_headline = re.sub(
+        r"\bWarrant register\b",
+        "Warrant Register",
+        new_headline,
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -3426,12 +3541,19 @@ def normalize_validated_action_language(
     The action ledger controls the permitted action strength.
     """
 
-    changed = (
-        normalize_validated_formal_status_language(
-            story,
-            intelligence,
-        )
-    )
+    changed = False
+
+    if normalize_validated_warrant_register_name(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    ):
+        changed = True
 
     if normalize_validated_cdbg_report_name(
         story,
