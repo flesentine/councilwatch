@@ -406,6 +406,184 @@ def test_cdbg_report_name_guard_requires_validated_cdbg_identity():
     assert story.headline == original
 
 
+def test_cdbg_report_name_guard_replaces_generic_federal_grant_label():
+    story = make_story(
+        dek=(
+            "The council adopted the annual federal grant "
+            "performance report."
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title=(
+                    "Consolidated Annual Performance Evaluation Report "
+                    "for the Community Development Block Grant Program"
+                ),
+            )
+        ]
+    }
+
+    assert pc.normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    )
+
+    assert story.dek == (
+        "The council adopted the CDBG performance report."
+    )
+
+
+def test_public_comment_ballot_scope_drops_unverified_measure_definition():
+    story = make_story(
+        body=[
+            (
+                "Public comments also addressed Measure F, a ballot "
+                "measure concerning municipal term limits. Several "
+                "speakers voiced opposition."
+            )
+        ],
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Public Opposition to Measure F Term Limit Ballot Question",
+                "no council action",
+                evidence_quote=(
+                    "A speaker discussed Measure F and term limits."
+                ),
+            )
+        ]
+    }
+
+    assert pc.normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "Public comments also addressed Measure F. Several "
+            "speakers voiced opposition."
+        )
+    ]
+
+
+def test_ballot_scope_keeps_definition_when_validated_formal_action_supports_measure():
+    original = (
+        "The council adopted Measure A, a ballot measure concerning "
+        "park funding."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ],
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Measure A park funding ballot measure",
+                "adopted",
+                evidence_quote=(
+                    "The council adopted Measure A concerning park funding."
+                ),
+            )
+        ]
+    }
+
+    assert not pc.normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
+def test_role_labeled_person_whitelist_scrubs_unverified_transcript_name():
+    story = make_story(
+        body=[
+            "Council Member Voits was absent.",
+        ],
+    )
+
+    assert pc.enforce_role_labeled_person_whitelist(
+        story,
+        {
+            "entities": [],
+        },
+    )
+
+    assert story.body == [
+        "A council member was absent.",
+    ]
+
+
+def test_role_labeled_person_whitelist_uses_verified_canonical_name():
+    story = make_story(
+        body=[
+            "Council Member Voits was absent.",
+        ],
+    )
+
+    intelligence = {
+        "entities": [
+            {
+                "entity_type": "person",
+                "status": "CORRECTED",
+                "observed_text": "Voits",
+                "canonical_text": "Scott Voigts",
+            }
+        ]
+    }
+
+    assert pc.enforce_role_labeled_person_whitelist(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        "Council Member Scott Voigts was absent.",
+    ]
+
+
+def test_role_labeled_person_whitelist_preserves_verified_canonical_name():
+    original = "Council Member Scott Voigts was absent."
+
+    story = make_story(
+        body=[
+            original,
+        ],
+    )
+
+    intelligence = {
+        "entities": [
+            {
+                "entity_type": "person",
+                "status": "VERIFIED",
+                "observed_text": "Scott Voigts",
+                "canonical_text": "Scott Voigts",
+            }
+        ]
+    }
+
+    assert not pc.enforce_role_labeled_person_whitelist(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
 def test_formal_status_normalization_handles_two_independent_clauses():
     story = make_story(
         dek=(
