@@ -247,3 +247,25 @@ def test_role_labeled_person_correction_requires_role_and_conservative_phonetics
         "Jones",
         role_candidates,
     )
+
+
+def test_public_copy_naming_rules_preserve_official_report_identity():
+    rules = " ".join(
+        mi.public_copy_naming_rules().lower().split()
+    )
+
+    assert "official source name" in rules
+    assert "cdbg performance" in rules
+    assert "federal housing and infrastructure report" in rules
+    assert "invent a broader" in rules
+
+
+def test_public_copy_naming_rules_keep_ballot_component_claims_attributed():
+    rules = " ".join(
+        mi.public_copy_naming_rules().lower().split()
+    )
+
+    assert "ballot measure" in rules
+    assert "one component" in rules
+    assert "attribute that narrower description to the speakers" in rules
+    assert "public comment is evidence of what the speaker said" in rules
