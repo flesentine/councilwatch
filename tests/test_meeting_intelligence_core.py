@@ -703,3 +703,110 @@ def test_substantive_formal_agenda_items_catches_aliso_style_actions():
         in item["title"]
         for item in candidates
     )
+
+
+def test_action_words_ignore_calendar_year_tokens():
+    assert _action_words(
+        "Fiscal Year 2025 2026 Budget Reappropriation"
+    ) == {
+        "fiscal",
+        "year",
+        "budget",
+        "reappropriation",
+    }
+
+
+def test_topic_scope_rejects_unrelated_generic_fiscal_overlap():
+    topic = (
+        "Fiscal Year 2025-26 Fund Balance "
+        "Reappropriation and Budget Amendment"
+    )
+
+    unrelated = (
+        "Attended a budget and finance subcommittee meeting "
+        "to review fiscal responsibility and capital improvements."
+    )
+
+    assert not _topic_scope_supported(
+        topic,
+        unrelated,
+    )
+
+    assert _topic_scope_supported(
+        topic,
+        (
+            "The Council discussed the fund balance "
+            "reappropriation and budget amendment."
+        ),
+    )
+
+
+def test_topic_scope_rejects_generic_report_overlap_for_caper():
+    topic = (
+        "2025-2026 Consolidated Annual Performance "
+        "and Evaluation Report (CAPER)"
+    )
+
+    assert not _topic_scope_supported(
+        topic,
+        "Staff presented the annual financial report.",
+    )
+
+    assert _topic_scope_supported(
+        topic,
+        (
+            "The Council discussed the annual performance "
+            "report and CAPER."
+        ),
+    )
+
+
+def test_consent_action_quote_accepts_child_item_after_parent_heading():
+    agenda_items = [
+        {
+            "item_number": "4.5",
+            "section": "CONSENT CALENDAR",
+            "title": "BUDGET REAPPROPRIATION",
+        },
+        {
+            "item_number": "4.7",
+            "section": "CONSENT CALENDAR",
+            "title": "CAPER",
+        },
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    notes = """
+#### Item 4: Consent Calendar
+* **Item 4.8: Lease Renewal.**
+* **Motion:** Council Member Tiffany moved to approve Item 4.8.
+* **Vote:** Motion carried unanimously (4-0).
+"""
+
+    quote = _best_supported_consent_action_quote(
+        "4.8",
+        agenda_items,
+        notes,
+    )
+
+    assert quote is not None
+    assert "Item 4.8: Lease Renewal" in quote
+    assert "Motion carried unanimously" in quote
+
+    # The same block must not be borrowed by neighboring
+    # consent items that are not identified in the source.
+    assert _best_supported_consent_action_quote(
+        "4.5",
+        agenda_items,
+        notes,
+    ) is None
+
+    assert _best_supported_consent_action_quote(
+        "4.7",
+        agenda_items,
+        notes,
+    ) is None
