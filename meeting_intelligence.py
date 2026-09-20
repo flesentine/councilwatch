@@ -3191,16 +3191,10 @@ def _local_topic_anchor_supported(
     Require strong local topical identity without depending entirely
     on the editorial topic label matching the transcript vocabulary.
 
-    This is intentionally conservative. Generic words such as
-    "public", "comment", "resident", and "council" do not count as
-    topical anchors.
+    Generic treatment words such as "public", "comment",
+    "discussion", "resident", and "council" cannot by themselves
+    establish which subject is being discussed.
     """
-    if _turn_window_topic_identity_span(
-        topic,
-        candidate,
-    ):
-        return True
-
     topic_words = set(
         _action_words(
             topic
@@ -3220,13 +3214,45 @@ def _local_topic_anchor_supported(
         "comment",
         "comments",
         "council",
+        "discuss",
+        "discussed",
+        "discussion",
+        "discussions",
         "public",
         "resident",
         "residents",
         "speaker",
     }
 
-    topic_words -= generic_words
+    specific_topic_words = (
+        topic_words
+        - generic_words
+    )
+
+    identity = (
+        _turn_window_topic_identity_span(
+            topic,
+            candidate,
+        )
+    )
+
+    if identity:
+        matched_words = set(
+            identity[2]
+        )
+
+        # When the editorial topic contains specific subject words,
+        # at least one of them must occur in the local identity span.
+        # This prevents procedural "public comment" boilerplate from
+        # validating unrelated topics such as a named ballot measure.
+        if (
+            not specific_topic_words
+            or matched_words
+            & specific_topic_words
+        ):
+            return True
+
+    topic_words = specific_topic_words
     candidate_words -= generic_words
 
     overlap = len(
@@ -3731,42 +3757,30 @@ def _staff_followup_language_supported(
     ):
         return True
 
-    # A response can be a follow-up, but only when someone actually
-    # asks/requests it. Procedural rules about who staff may respond
-    # to are not evidence that follow-up was requested.
-    if not re.search(
-        r"\brespond(?:s|ed|ing)?\b|"
-        r"\bresponse\b",
-        normalized,
-        re.I,
-    ):
-        return False
-
-    request_cue = re.search(
+    # "Respond" is weaker than an actual follow-up verb and appears
+    # frequently in procedural meeting instructions. Count it only
+    # when the SAME sentence/clause explicitly asks or requests staff
+    # to respond.
+    response_request_patterns = (
         r"\b(?:"
         r"ask|asks|asked|asking|"
         r"request|requests|requested|requesting|"
-        r"urge|urges|urged|urging|"
-        r"please|"
-        r"would\s+like|"
-        r"want|wants|wanted|"
-        r"can|could|would"
-        r")\b",
-        normalized,
-        re.I,
-    )
-
-    if not request_cue:
-        return False
-
-    response_patterns = (
+        r"urge|urges|urged|urging"
+        r")\b"
+        r"[^.!?\n]{0,140}"
         r"\b(?:city\s+)?staff\b"
-        r"[^.!?\n]{0,180}"
-        r"\b(?:respond(?:s|ed|ing)?|response)\b",
+        r"[^.!?\n]{0,120}"
+        r"\brespond(?:s|ed|ing)?\b",
 
-        r"\b(?:respond(?:s|ed|ing)?|response)\b"
-        r"[^.!?\n]{0,180}"
-        r"\b(?:city\s+)?staff\b",
+        r"\b(?:city\s+)?staff\b"
+        r"[^.!?\n]{0,80}"
+        r"\b(?:"
+        r"was\s+asked|were\s+asked|"
+        r"was\s+requested|were\s+requested|"
+        r"was\s+urged|were\s+urged"
+        r")\b"
+        r"[^.!?\n]{0,120}"
+        r"\brespond(?:s|ed|ing)?\b",
     )
 
     return any(
@@ -3775,7 +3789,7 @@ def _staff_followup_language_supported(
             normalized,
             re.I,
         )
-        for pattern in response_patterns
+        for pattern in response_request_patterns
     )
 
 

@@ -590,6 +590,34 @@ def test_public_comment_ballot_scope_removes_unsupported_appositive():
     )
 
 
+def test_public_comment_ballot_scope_removes_proposed_local_measure_appositive():
+    story = make_story(
+        body=[
+            (
+                "Public commentary featured discussion surrounding Measure F, "
+                "a proposed local measure addressing council term limits. "
+                "Residents criticized the proposal."
+            )
+        ],
+    )
+
+    intelligence = {
+        "action_ledger": [],
+    }
+
+    assert pc.normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "Public commentary featured discussion surrounding Measure F. "
+            "Residents criticized the proposal."
+        )
+    ]
+
+
 def test_public_comment_ballot_scope_preserves_official_formal_measure_scope():
     original = (
         "The Council approved Measure F, a ballot measure concerning "
