@@ -99,6 +99,33 @@ NONFORMAL_TREATMENT_STATUSES = {
 }
 
 
+ALLOWED_ACTION_STATUSES = (
+    ACTION_FORMAL_STATUSES
+    | NONFORMAL_TREATMENT_STATUSES
+    | {"unclear"}
+)
+
+
+def _canonical_action_status(
+    value,
+):
+    """
+    Action status is a closed vocabulary.
+
+    Model-generated labels such as "agenda", "scheduled", or
+    "recommended" are not dispositions and must never survive into
+    the validated ledger. Unknown labels fail closed to UNCLEAR.
+    """
+    normalized = _action_norm(
+        value
+    )
+
+    if normalized in ALLOWED_ACTION_STATUSES:
+        return normalized
+
+    return "unclear"
+
+
 def _nonformal_source_supported(
     status,
     source_name,
@@ -4809,6 +4836,15 @@ CRITICAL RULES:
 
 8. evidence_quote must be copied verbatim. Do not paraphrase it.
 
+9. action_status is a CLOSED VOCABULARY. Use ONLY one of:
+   approved, adopted, authorized, awarded, directed, rejected,
+   denied, appointed, accepted, passed, discussed, considered,
+   requested staff follow-up, resident comment, public comment,
+   speaker comment, no council action, unclear.
+
+   Do NOT use source labels such as "agenda", "notes", "scheduled",
+   "listed", "recommended", or section names as action_status.
+
 ================ REQUIRED COVERAGE TOPICS ================
 
 {json.dumps(required_topics, ensure_ascii=False, indent=2)}
@@ -4905,8 +4941,17 @@ receive an action-ledger disposition grounded in the source evidence.
             agenda_section = ""
             agenda_title = ""
 
-        status = _action_norm(
+        raw_status = _action_norm(
             item.get("action_status")
+        )
+
+        status = _canonical_action_status(
+            raw_status
+        )
+
+        status_was_normalized = bool(
+            raw_status
+            and raw_status != status
         )
 
         source_name = _action_norm(
@@ -5610,20 +5655,48 @@ receive an action-ledger disposition grounded in the source evidence.
 
         validation_note = ""
 
+        if status_was_normalized:
+            validation_note = (
+                "Unrecognized model action_status "
+                + repr(raw_status)
+                + " was normalized to 'unclear'."
+            )
+
         if not quote_valid:
             validation_note = (
+                (
+                    validation_note.rstrip()
+                    + " "
+                )
+                if validation_note
+                else ""
+            ) + (
                 "Evidence quote was not found verbatim "
                 "in the claimed source."
             )
 
         elif formal and not formal_valid:
             validation_note = (
+                (
+                    validation_note.rstrip()
+                    + " "
+                )
+                if validation_note
+                else ""
+            ) + (
                 "Formal action lacked sufficiently specific "
                 "topic/item-linked action evidence."
             )
 
         elif not formal and not nonformal_valid:
             validation_note = (
+                (
+                    validation_note.rstrip()
+                    + " "
+                )
+                if validation_note
+                else ""
+            ) + (
                 "Nonformal status lacked sufficiently specific "
                 "topic-local treatment evidence."
             )
