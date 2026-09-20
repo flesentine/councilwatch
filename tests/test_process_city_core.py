@@ -315,6 +315,93 @@ def test_formal_status_normalization_canonicalizes_certified_warrant_register():
     ).lower()
 
 
+def test_warrant_name_guard_canonicalizes_financial_warrants():
+    story = make_story(
+        headline=(
+            "Lake Forest City Council Adopts CDBG Annual Report, "
+            "Certifies Financial Warrants, and Receives Fee Study"
+        ),
+        dek=(
+            "The council approved the financial warrants."
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Warrant Register and Legal Fee Expenditures",
+                "approved",
+                agenda_title="Certification of Warrant Register",
+            )
+        ]
+    }
+
+    assert pc.normalize_validated_warrant_register_name(
+        story,
+        intelligence,
+    )
+
+    assert "Warrant Register" in story.headline
+    assert "financial warrants" not in story.dek.lower()
+
+
+def test_action_language_normalizes_certifies_financial_warrants_end_to_end():
+    story = make_story(
+        headline=(
+            "Lake Forest City Council Adopts CDBG Annual Report, "
+            "Certifies Financial Warrants, and Receives Fee Study"
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title="CDBG CAPER",
+            ),
+            action(
+                "Warrant Register and Legal Fee Expenditures",
+                "approved",
+                agenda_title="Certification of Warrant Register",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_action_language(
+        story,
+        intelligence,
+    )
+
+    assert "Approves Warrant Register" in story.headline
+    assert "Certifies Financial Warrants" not in story.headline
+
+
+def test_warrant_name_guard_requires_validated_warrant_register_identity():
+    original = "Council Certifies Financial Warrants"
+
+    story = make_story(
+        headline=original,
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Monthly Finance Report",
+                "approved",
+                agenda_title="Monthly Finance Report",
+            )
+        ]
+    }
+
+    assert not pc.normalize_validated_warrant_register_name(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == original
+
+
 def test_formal_status_normalization_keeps_advanced_adjective_in_coordination():
     original = (
         "The Council approved the signal contract and advanced "
