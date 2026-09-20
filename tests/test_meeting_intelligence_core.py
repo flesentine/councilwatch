@@ -16,6 +16,7 @@ from meeting_intelligence import (
     _best_supported_formal_action_quote,
     _best_supported_raw_council_commentary_quote,
     _candidate_has_foreign_agenda_transition,
+    _canonical_action_status,
     _canonical_agenda_section,
     _canonical_formal_status_from_quote,
     _conflicted_generic_collective_formal_action,
@@ -839,3 +840,20 @@ def test_unclear_may_remain_agenda_backed_without_claiming_treatment():
         "unclear",
         "agenda",
     )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("approved", "approved"),
+        ("Considered", "considered"),
+        ("requested staff follow-up", "requested staff follow-up"),
+        ("unclear", "unclear"),
+        ("agenda", "unclear"),
+        ("scheduled", "unclear"),
+        ("CONSENT CALENDAR", "unclear"),
+        ("", "unclear"),
+    ],
+)
+def test_action_status_is_closed_vocabulary(raw, expected):
+    assert _canonical_action_status(raw) == expected
