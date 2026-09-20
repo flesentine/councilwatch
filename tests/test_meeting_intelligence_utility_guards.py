@@ -250,7 +250,9 @@ def test_role_labeled_person_correction_requires_role_and_conservative_phonetics
 
 
 def test_public_copy_naming_rules_preserve_official_report_identity():
-    rules = mi.public_copy_naming_rules().lower()
+    rules = " ".join(
+        mi.public_copy_naming_rules().lower().split()
+    )
 
     assert "official source name" in rules
     assert "cdbg performance" in rules
@@ -259,7 +261,9 @@ def test_public_copy_naming_rules_preserve_official_report_identity():
 
 
 def test_public_copy_naming_rules_keep_ballot_component_claims_attributed():
-    rules = mi.public_copy_naming_rules().lower()
+    rules = " ".join(
+        mi.public_copy_naming_rules().lower().split()
+    )
 
     assert "ballot measure" in rules
     assert "one component" in rules
