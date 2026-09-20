@@ -1798,6 +1798,350 @@ def _consent_item_source_labels(
     return labels
 
 
+def _consent_pulled_item_numbers(
+    value,
+):
+    """
+    Extract only item numbers explicitly described as pulled,
+    removed, or separated for individual action.
+
+    Ordinary agenda-item references elsewhere in the block do not
+    count as pulled items.
+    """
+    numbers = set()
+
+    for line in str(
+        value or ""
+    ).splitlines():
+        normalized = _evidence_text_norm(
+            line
+        )
+
+        if not re.search(
+            r"\b(?:"
+            r"pull|pulled|"
+            r"remove|removed|"
+            r"separate|separated"
+            r")\b",
+            normalized,
+            re.I,
+        ):
+            continue
+
+        numbers.update(
+            _evidence_agenda_item_numbers(
+                line
+            )
+        )
+
+        # Spoken/source-note forms can say "pull 4.8" without
+        # repeating the word "Item".
+        for match in re.finditer(
+            r"\b(?:"
+            r"pull|pulled|"
+            r"remove|removed|"
+            r"separate|separated"
+            r")\b"
+            r"[^0-9\n]{0,40}"
+            r"(\d+(?:\.\d+)*)",
+            line,
+            re.I,
+        ):
+            numbers.add(
+                match.group(
+                    1
+                )
+            )
+
+    return numbers
+
+
+def _consent_item_specific_motion_supported(
+    item_number,
+    agenda_items,
+    quote,
+):
+    """
+    A pulled item can still have a separate valid approval in the
+    same source block, but only when a local motion explicitly names
+    that exact item and a nearby result follows.
+    """
+    labels = _consent_item_source_labels(
+        item_number,
+        agenda_items,
+    )
+
+    if not labels:
+        return False
+
+    lines = [
+        line
+        for line in str(
+            quote or ""
+        ).splitlines()
+        if line.strip()
+    ]
+
+    for index, line in enumerate(
+        lines
+    ):
+        normalized = _evidence_text_norm(
+            line
+        )
+
+        if not re.search(
+            r"\b(?:motion|moved)\b",
+            normalized,
+            re.I,
+        ):
+            continue
+
+        if not re.search(
+            r"\b(?:approve|approved|adopt|adopted|pass|passed)\b",
+            normalized,
+            re.I,
+        ):
+            continue
+
+        referenced = (
+            _evidence_agenda_item_numbers(
+                line
+            )
+        )
+
+        # Also accept a direct bare numeric reference in the motion
+        # line, such as "moved to approve 4.8".
+        for label in labels:
+            if re.search(
+                rf"(?<![0-9.]){re.escape(label)}(?![0-9.])",
+                line,
+            ):
+                referenced.add(
+                    label
+                )
+
+        if not (
+            referenced
+            & labels
+        ):
+            continue
+
+        local = " ".join(
+            lines[
+                index:
+                min(
+                    len(lines),
+                    index + 4,
+                )
+            ]
+        )
+
+        if re.search(
+            r"\b(?:"
+            r"vote|"
+            r"unanimous|unanimously|"
+            r"carried|carries|"
+            r"passed|passes"
+            r")\b",
+            _evidence_text_norm(
+                local
+            ),
+            re.I,
+        ):
+            return True
+
+    return False
+
+
+def _best_supported_consent_remainder_quote(
+    item_number,
+    agenda_items,
+    notes,
+):
+    """
+    Recover a collective Consent Calendar approval for one official
+    consent item when recording-derived notes explicitly establish:
+
+      * which item(s) were pulled/removed for separate action;
+      * a motion to approve the remainder/rest/balance of Consent;
+      * a completed vote/result on that remainder motion.
+
+    The target item must be an official Consent Calendar item and
+    must NOT be one of the explicitly pulled items.
+
+    This deliberately does not treat a generic "Consent Calendar
+    approved" statement as sufficient evidence.
+    """
+    labels = _consent_item_source_labels(
+        item_number,
+        agenda_items,
+    )
+
+    if not labels:
+        return None
+
+    source = str(
+        notes or ""
+    )
+
+    # This inference is intentionally limited to structured
+    # recording-derived notes. Raw whole-meeting transcripts should
+    # first be converted into a bounded source-note evidence block.
+    if len(
+        source.splitlines()
+    ) <= 2:
+        return None
+
+    lines = source.splitlines()
+
+    for start, raw_line in enumerate(
+        lines
+    ):
+        if "consent calendar" not in _evidence_text_norm(
+            raw_line
+        ):
+            continue
+
+        block = []
+
+        for index in range(
+            start,
+            min(
+                len(lines),
+                start + 28,
+            ),
+        ):
+            candidate = lines[
+                index
+            ]
+
+            candidate_norm = _evidence_text_norm(
+                candidate
+            )
+
+            if (
+                index > start
+                and candidate.lstrip().startswith(
+                    "#"
+                )
+                and "consent calendar" not in candidate_norm
+            ):
+                break
+
+            if (
+                index > start
+                and re.match(
+                    r"^(?:"
+                    r"public hearings?|"
+                    r"discussion|"
+                    r"city manager|"
+                    r"announcements?|"
+                    r"adjournment"
+                    r")\b",
+                    candidate_norm,
+                    re.I,
+                )
+            ):
+                break
+
+            block.append(
+                candidate
+            )
+
+        quote = "\n".join(
+            block
+        ).strip()
+
+        if not quote:
+            continue
+
+        quote_norm = _evidence_text_norm(
+            quote
+        )
+
+        pulled = _consent_pulled_item_numbers(
+            quote
+        )
+
+        # "Remainder" is only safe when the source identifies what
+        # was removed. Otherwise we do not know whether the target
+        # item remained in the collective motion.
+        if not pulled:
+            continue
+
+        if (
+            pulled
+            & labels
+        ):
+            continue
+
+        has_remainder_scope = bool(
+            re.search(
+                r"\b(?:"
+                r"remainder|"
+                r"remaining|"
+                r"rest|"
+                r"balance"
+                r")\b"
+                r"[^.!?\n]{0,120}"
+                r"\bconsent calendar\b"
+                r"|"
+                r"\bconsent calendar\b"
+                r"[^.!?\n]{0,120}"
+                r"\b(?:"
+                r"remainder|"
+                r"remaining|"
+                r"rest|"
+                r"balance"
+                r")\b",
+                quote_norm,
+                re.I,
+            )
+        )
+
+        if not has_remainder_scope:
+            continue
+
+        has_approval_motion = bool(
+            re.search(
+                r"\b(?:"
+                r"motion\s+to\s+approve|"
+                r"moved\s+to\s+approve|"
+                r"approve\s+the\s+(?:remainder|remaining|rest|balance)"
+                r")\b",
+                quote_norm,
+                re.I,
+            )
+        )
+
+        has_result = bool(
+            re.search(
+                r"\b(?:"
+                r"motion\s+(?:carried|carries|passed|passes)|"
+                r"carried\s+unanimously|"
+                r"carries\s+unanimously|"
+                r"passed\s+unanimously|"
+                r"passes\s+unanimously|"
+                r"unanimous(?:ly)?\s+(?:voice\s+)?vote"
+                r")\b",
+                quote_norm,
+                re.I,
+            )
+        )
+
+        if (
+            has_approval_motion
+            and has_result
+            and _quote_is_in_source(
+                quote,
+                notes,
+            )
+        ):
+            return quote
+
+    return None
+
+
 def _best_supported_consent_action_quote(
     item_number,
     agenda_items,
@@ -1917,6 +2261,27 @@ def _best_supported_consent_action_quote(
                 quote
             )
         )
+
+        pulled_numbers = (
+            _consent_pulled_item_numbers(
+                quote
+            )
+        )
+
+        # A remainder-of-Consent approval cannot be borrowed by an
+        # item explicitly pulled for separate action. Preserve a
+        # pulled item only when the same local block contains its own
+        # exact item-specific motion + result.
+        if (
+            pulled_numbers
+            & labels
+            and not _consent_item_specific_motion_supported(
+                item_number,
+                agenda_items,
+                quote,
+            )
+        ):
+            continue
 
         # The parent Consent Calendar heading may identify only the
         # section (for example "Item 4: Consent Calendar") while the
@@ -5060,6 +5425,15 @@ receive an action-ledger disposition grounded in the source evidence.
                 )
             )
 
+            if not consent_action_quote:
+                consent_action_quote = (
+                    _best_supported_consent_remainder_quote(
+                        item_number,
+                        agenda_items,
+                        notes,
+                    )
+                )
+
             if (
                 consent_action_quote
                 and not _action_evidence_quote_is_bounded(
@@ -6459,6 +6833,27 @@ Do NOT turn an agenda recommendation into a completed council action.
 
 When a detail is uncertain, preserve the uncertainty explicitly rather
 than silently choosing an interpretation.
+
+CONSENT CALENDAR VOTE AUDIT:
+Whenever the meeting uses a Consent Calendar, preserve the collective
+vote structure even when most individual items are not discussed.
+Record a compact evidence block with:
+- Items explicitly pulled/removed for separate action, by item number
+- The exact motion on the remainder/rest/balance of the Consent Calendar
+- The vote/result on that remainder motion
+- Any separate motion/vote on a pulled item
+
+Use this exact field style when the recording supports it:
+
+### Consent Calendar Vote Audit
+Items explicitly pulled: Item 4.8
+Remainder motion: Motion to approve the remainder of the Consent Calendar.
+Remainder vote: Motion carried unanimously.
+Separate action: Item 4.8 — motion to approve; motion carried 4-0.
+
+Do NOT invent the list of remaining items from memory. The official
+agenda will supply item identity later. If the recording is unclear,
+write UNCLEAR rather than inferring a collective approval.
 """.strip()
 
 
