@@ -88,6 +88,44 @@ ACTION_FORMAL_STATUSES = {
 }
 
 
+NONFORMAL_TREATMENT_STATUSES = {
+    "discussed",
+    "considered",
+    "requested staff follow-up",
+    "resident comment",
+    "public comment",
+    "speaker comment",
+    "no council action",
+}
+
+
+def _nonformal_source_supported(
+    status,
+    source_name,
+):
+    """
+    Agenda text can prove that an item was scheduled, but it cannot
+    prove that Council actually discussed, considered, commented on,
+    or requested follow-up on that item.
+
+    Reader-facing treatment statuses therefore require
+    recording-derived notes. UNCLEAR may remain agenda-backed because
+    it makes no claim about what happened at the meeting.
+    """
+    status = _action_norm(
+        status
+    )
+
+    source_name = _action_norm(
+        source_name
+    )
+
+    if status not in NONFORMAL_TREATMENT_STATUSES:
+        return True
+
+    return source_name == "notes"
+
+
 ACTION_EVIDENCE_TERMS = {
     "approve",
     "approved",
@@ -5486,10 +5524,16 @@ receive an action-ledger disposition grounded in the source evidence.
                     )
                 )
 
-        nonformal_valid = True
+        nonformal_valid = (
+            _nonformal_source_supported(
+                status,
+                source_name,
+            )
+        )
 
         if (
-            not formal
+            nonformal_valid
+            and not formal
             and raw_transcript
         ):
             if status in {
@@ -5699,10 +5743,7 @@ receive an action-ledger disposition grounded in the source evidence.
         if (
             not validated
             and status
-            in {
-                "discussed",
-                "considered",
-            }
+            in NONFORMAL_TREATMENT_STATUSES
         ):
             status = "unclear"
 
