@@ -1199,6 +1199,16 @@ def normalize_validated_formal_status_language(
         r"|(?:\band\s+)"
         r")"
         r"(?P<verb>"
+        r"approve|approves|approved|approving|"
+        r"adopt|adopts|adopted|adopting|"
+        r"authorize|authorizes|authorized|authorizing|"
+        r"award|awards|awarded|awarding|"
+        r"direct|directs|directed|directing|"
+        r"reject|rejects|rejected|rejecting|"
+        r"deny|denies|denied|denying|"
+        r"appoint|appoints|appointed|appointing|"
+        r"accept|accepts|accepted|accepting|"
+        r"pass|passes|passed|passing|"
         r"advance|advances|advanced|advancing|"
         r"certify|certifies|certified|certifying|"
         r"ratify|ratifies|ratified|ratifying"
@@ -1433,6 +1443,51 @@ def normalize_validated_formal_status_language(
                     local_statuses
                 )
             )
+
+            observed_status = (
+                word_to_status.get(
+                    verb.lower()
+                )
+            )
+
+            # Preserve the existing narrow embedded-effect rule:
+            # an ADOPTED resolution that explicitly provides for
+            # APPOINTMENT may correctly be described as appointing
+            # the officeholders. Do not rewrite that local verb to
+            # the syntactically wrong "adopted the commissioners."
+            if (
+                local_status == "adopted"
+                and observed_status == "appointed"
+            ):
+                embedded_appointment = False
+
+                for action, _ in local_matches:
+                    identity = (
+                        str(
+                            action.get(
+                                "agenda_title",
+                                "",
+                            )
+                        )
+                        + " "
+                        + str(
+                            action.get(
+                                "topic",
+                                "",
+                            )
+                        )
+                    )
+
+                    if re.search(
+                        r"\bappoint(?:ed|ing|ment|ments)?\b",
+                        identity,
+                        re.I,
+                    ):
+                        embedded_appointment = True
+                        break
+
+                if embedded_appointment:
+                    continue
 
             replacement = (
                 noncanonical_replacement_word(
@@ -2865,6 +2920,496 @@ def normalize_validated_cdbg_report_name(
 
 
 
+def normalize_public_comment_ballot_scope(
+    story,
+    intelligence,
+):
+    """
+    Remove an unsupported independent description of a ballot
+    measure's full scope when CouncilWatch has only public-comment
+    treatment for that measure and no validated official agenda
+    action establishing the measure's scope.
+
+    This guard does not decide what the measure means. It preserves
+    the neutral measure label and leaves narrower claims attributed
+    to speakers elsewhere in the copy.
+    """
+    formal_measure_labels = set()
+
+    for action in intelligence.get(
+        "action_ledger",
+        [],
+    ):
+        if (
+            action.get("validated") is not True
+            or action.get(
+                "agenda_linkage_conflict"
+            )
+        ):
+            continue
+
+        status = str(
+            action.get(
+                "action_status",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if status not in ACTION_FORMAL_STATUSES:
+            continue
+
+        identity = (
+            str(
+                action.get(
+                    "topic",
+                    "",
+                )
+                or ""
+            )
+            + " "
+            + str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+                or ""
+            )
+        )
+
+        for match in re.finditer(
+            r"\bMeasure\s+([A-Z])\b",
+            identity,
+            re.I,
+        ):
+            formal_measure_labels.add(
+                match.group(
+                    1
+                ).upper()
+            )
+
+    def scrub(value):
+        value = str(
+            value or ""
+        )
+
+        def replace_appositive(
+            match,
+        ):
+            label = match.group(
+                "label"
+            ).upper()
+
+            if label in formal_measure_labels:
+                return match.group(
+                    0
+                )
+
+            trailing_clause = bool(
+                re.search(
+                    r",\s*$",
+                    match.group(
+                        0
+                    ),
+                )
+            )
+
+            return (
+                "Measure "
+                + label
+                + (
+                    " "
+                    if trailing_clause
+                    else ""
+                )
+            )
+
+        cleaned = re.sub(
+            r"\bMeasure\s+(?P<label>[A-Z])"
+            r",\s+"
+            r"(?:an?\s+)?"
+            r"(?:ballot\s+)?measure"
+            r"\s+(?:concerning|about|regarding|that\s+would|which\s+would)"
+            r"[^,.;]*"
+            r"(?:,\s*)?",
+            replace_appositive,
+            value,
+            flags=re.I,
+        )
+
+        cleaned = re.sub(
+            r"\bMeasure\s+(?P<label>[A-Z])"
+            r",\s+"
+            r"(?:an?\s+)?"
+            r"(?:term[-\s]?limit|election|governance)"
+            r"\s+(?:ballot\s+)?measure\b",
+            replace_appositive,
+            cleaned,
+            flags=re.I,
+        )
+
+        cleaned = re.sub(
+            r"[ \t]{2,}",
+            " ",
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"\s+([,.;:])",
+            r"\1",
+            cleaned,
+        )
+
+        return cleaned.strip()
+
+    changed = False
+
+    for field in (
+        "headline",
+        "dek",
+    ):
+        old = str(
+            getattr(
+                story,
+                field,
+                "",
+            )
+            or ""
+        )
+
+        new = scrub(
+            old
+        )
+
+        if new != old:
+            setattr(
+                story,
+                field,
+                new,
+            )
+            changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
+def enforce_publishable_person_names(
+    story,
+    intelligence,
+):
+    """
+    Deterministic backstop for the person-name whitelist.
+
+    VERIFIED/CORRECTED canonical people with an official source may
+    appear. A verified observed typo may be corrected to the
+    canonical name. Other role-labeled human names are generalized
+    so the model cannot publish an unverified surname merely because
+    it survived a writing pass.
+    """
+    canonical_people = set()
+    corrected_variants = {}
+
+    for entity in intelligence.get(
+        "entities",
+        [],
+    ):
+        if str(
+            entity.get(
+                "entity_type",
+                "",
+            )
+            or ""
+        ).casefold() != "person":
+            continue
+
+        status = str(
+            entity.get(
+                "status",
+                "",
+            )
+            or ""
+        ).strip().upper()
+
+        canonical = str(
+            entity.get(
+                "canonical_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        observed = str(
+            entity.get(
+                "observed_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        official_url = str(
+            entity.get(
+                "official_source_url",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if (
+            status not in {
+                "VERIFIED",
+                "CORRECTED",
+            }
+            or not canonical
+            or not official_url
+        ):
+            continue
+
+        canonical_people.add(
+            canonical.casefold()
+        )
+
+        if (
+            status == "CORRECTED"
+            and observed
+            and observed.casefold()
+            != canonical.casefold()
+        ):
+            corrected_variants[
+                observed
+            ] = canonical
+
+    role_pattern = re.compile(
+        r"\b(?P<role>(?i:"
+        r"council\s+member|"
+        r"councilmember|"
+        r"mayor\s+pro\s+tem|"
+        r"vice\s+mayor|"
+        r"mayor"
+        r"))\s+"
+        r"(?P<name>"
+        r"[A-Z][A-Za-z'’\-]*"
+        r"(?:\s+"
+        r"(?!(?:"
+        r"Was|Were|Is|Are|Has|Had|"
+        r"Gives|Gave|Says|Said|Speaks|Spoke|"
+        r"Joins|Joined|Votes|Voted|"
+        r"Opposes|Opposed|Supports|Supported|"
+        r"Thanks|Thanked|Asks|Asked|"
+        r"Notes|Noted|Reports|Reported|"
+        r"Attends|Attended|Introduces|Introduced|"
+        r"Moves|Moved|Seconds|Seconded|"
+        r"Leaves|Left|Arrives|Arrived|"
+        r"Abstains|Abstained"
+        r")\b)"
+        r"[A-Z][A-Za-z'’\-]*)?"
+        r")\b"
+    )
+
+    def generic_role(
+        role,
+        *,
+        capitalize=False,
+    ):
+        low = re.sub(
+            r"\s+",
+            " ",
+            role.casefold(),
+        ).strip()
+
+        if low in {
+            "council member",
+            "councilmember",
+        }:
+            value = (
+                "a council member"
+            )
+
+        elif low == "mayor":
+            value = "the mayor"
+
+        elif low == "mayor pro tem":
+            value = (
+                "the mayor pro tem"
+            )
+
+        else:
+            value = (
+                "the vice mayor"
+            )
+
+        if capitalize:
+            value = (
+                value[0].upper()
+                + value[1:]
+            )
+
+        return value
+
+    def scrub(value):
+        value = str(
+            value or ""
+        )
+
+        cleaned = value
+
+        # Apply only explicit verifier-backed typo corrections.
+        for observed, canonical in sorted(
+            corrected_variants.items(),
+            key=lambda item: len(
+                item[0]
+            ),
+            reverse=True,
+        ):
+            cleaned = re.sub(
+                r"(?<![A-Za-z])"
+                + re.escape(
+                    observed
+                )
+                + r"(?![A-Za-z])",
+                canonical,
+                cleaned,
+                flags=re.I,
+            )
+
+        def replace_role_name(
+            match,
+        ):
+            name = re.sub(
+                r"\s+",
+                " ",
+                match.group(
+                    "name"
+                ),
+            ).strip()
+
+            if name.casefold() in canonical_people:
+                return match.group(
+                    0
+                )
+
+            # If the role-prefixed surface includes the exact full
+            # canonical name, it is safe.
+            full_surface = (
+                match.group(
+                    "role"
+                )
+                + " "
+                + name
+            )
+
+            if any(
+                canonical in full_surface.casefold()
+                for canonical
+                in canonical_people
+            ):
+                return match.group(
+                    0
+                )
+
+            return generic_role(
+                match.group(
+                    "role"
+                ),
+                capitalize=(
+                    match.start()
+                    == 0
+                ),
+            )
+
+        cleaned = role_pattern.sub(
+            replace_role_name,
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"[ \t]{2,}",
+            " ",
+            cleaned,
+        )
+
+        cleaned = re.sub(
+            r"\s+([,.;:])",
+            r"\1",
+            cleaned,
+        )
+
+        return cleaned.strip()
+
+    changed = False
+
+    for field in (
+        "headline",
+        "dek",
+    ):
+        old = str(
+            getattr(
+                story,
+                field,
+                "",
+            )
+            or ""
+        )
+
+        new = scrub(
+            old
+        )
+
+        if new != old:
+            setattr(
+                story,
+                field,
+                new,
+            )
+            changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -2885,6 +3430,18 @@ def normalize_validated_action_language(
     )
 
     if normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if enforce_publishable_person_names(
         story,
         intelligence,
     ):

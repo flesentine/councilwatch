@@ -406,6 +406,271 @@ def test_cdbg_report_name_guard_requires_validated_cdbg_identity():
     assert story.headline == original
 
 
+def test_formal_status_normalization_handles_three_action_headline_locally():
+    story = make_story(
+        headline=(
+            "Lake Forest City Council Adopts CDBG Performance Report, "
+            "Passes Warrant Register, and Receives Fee Study Report"
+        ),
+        dek=(
+            "The council adopted the CDBG performance report, passed "
+            "the warrant register, received the fee study report."
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title="CDBG CAPER",
+            ),
+            action(
+                "Warrant Register Approval",
+                "approved",
+                agenda_title="Certification of Warrant Register",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    )
+
+    assert "Approves Warrant Register" in story.headline
+    assert "approved the warrant register" in story.dek.lower()
+    assert "Passes Warrant Register" not in story.headline
+
+
+def test_public_comment_ballot_scope_removes_unsupported_appositive():
+    story = make_story(
+        body=[
+            (
+                "Public comments also addressed Measure F, a ballot "
+                "measure concerning municipal term limits. Several "
+                "speakers opposed proposed term-limit changes."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [],
+    }
+
+    assert pc.normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    )
+
+    assert (
+        story.body[0]
+        == (
+            "Public comments also addressed Measure F. Several "
+            "speakers opposed proposed term-limit changes."
+        )
+    )
+
+
+def test_public_comment_ballot_scope_preserves_official_formal_measure_scope():
+    original = (
+        "The Council approved Measure F, a ballot measure concerning "
+        "municipal term limits."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Measure F Term Limits",
+                "approved",
+                agenda_title="Measure F Term Limits",
+            )
+        ]
+    }
+
+    assert not pc.normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
+def test_person_name_guard_generalizes_unverified_role_labeled_name():
+    story = make_story(
+        body=[
+            "Council member Voits was absent."
+        ]
+    )
+
+    intelligence = {
+        "entities": [],
+    }
+
+    assert pc.enforce_publishable_person_names(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        "A council member was absent."
+    ]
+
+
+def test_person_name_guard_applies_verified_correction():
+    story = make_story(
+        body=[
+            "Council Member Voits was absent."
+        ]
+    )
+
+    intelligence = {
+        "entities": [
+            {
+                "entity_type": "person",
+                "status": "CORRECTED",
+                "observed_text": "Voits",
+                "canonical_text": "Scott Voigts",
+                "official_source_url": "https://example.gov/roster",
+            }
+        ]
+    }
+
+    assert pc.enforce_publishable_person_names(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        "Council Member Scott Voigts was absent."
+    ]
+
+
+def test_person_name_guard_preserves_exact_verified_canonical_name():
+    original = (
+        "Council Member Scott Voigts was absent."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "entities": [
+            {
+                "entity_type": "person",
+                "status": "VERIFIED",
+                "observed_text": "Scott Voigts",
+                "canonical_text": "Scott Voigts",
+                "official_source_url": "https://example.gov/roster",
+            }
+        ]
+    }
+
+    assert not pc.enforce_publishable_person_names(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
+def test_person_name_guard_generalizes_roles_across_all_public_fields():
+    story = make_story(
+        headline="Mayor Smith Gives Update",
+        dek="Vice Mayor Jones joined the discussion.",
+        body=[
+            "Mayor Pro Tem Roe was absent.",
+        ],
+        key_facts=[
+            "Councilmember Doe spoke during comments.",
+        ],
+    )
+
+    intelligence = {
+        "entities": [
+            {
+                "entity_type": "person",
+                "status": "UNVERIFIED",
+                "observed_text": "Smith",
+                "canonical_text": "Smith",
+                "official_source_url": "",
+            },
+            {
+                "entity_type": "organization",
+                "status": "VERIFIED",
+                "observed_text": "Doe",
+                "canonical_text": "Doe",
+                "official_source_url": "https://example.gov",
+            },
+        ]
+    }
+
+    assert pc.enforce_publishable_person_names(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == "The mayor Gives Update"
+    assert story.dek == "The vice mayor joined the discussion."
+    assert story.body == [
+        "The mayor pro tem was absent."
+    ]
+    assert story.key_facts == [
+        "A council member spoke during comments."
+    ]
+
+
+def test_ballot_scope_guard_scrubs_all_public_fields_and_term_limit_alias():
+    story = make_story(
+        headline="Measure F, a term-limit ballot measure",
+        dek=(
+            "Measure F, a ballot measure concerning municipal "
+            "term limits, drew public comment."
+        ),
+        body=[
+            (
+                "Residents discussed Measure F, a measure regarding "
+                "municipal term limits."
+            )
+        ],
+        key_facts=[
+            (
+                "Measure F, a ballot measure about municipal term "
+                "limits, was criticized by speakers."
+            )
+        ],
+    )
+
+    assert pc.normalize_public_comment_ballot_scope(
+        story,
+        {
+            "action_ledger": [],
+        },
+    )
+
+    assert story.headline == "Measure F"
+    assert story.dek == "Measure F drew public comment."
+    assert story.body == [
+        "Residents discussed Measure F."
+    ]
+    assert story.key_facts == [
+        "Measure F was criticized by speakers."
+    ]
+
+
 def test_formal_status_normalization_handles_two_independent_clauses():
     story = make_story(
         dek=(
