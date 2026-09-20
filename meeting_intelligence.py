@@ -8727,7 +8727,7 @@ def _guard_coverage_plan_money_values(
         )
 
     for match in re.finditer(
-        r"$(?P<dollars>\d{1,3}(?:,\d{3})+|\d+)"
+        r"\$(?P<dollars>\d{1,3}(?:,\d{3})+|\d+)"
         r"\s+(?P<cents>\d{2})(?!\d)",
         source_text,
     ):
@@ -8741,7 +8741,7 @@ def _guard_coverage_plan_money_values(
         )
 
     for match in re.finditer(
-        r"$(?P<dollars>\d{1,3}(?:,\d{3})+|\d+)"
+        r"\$(?P<dollars>\d{1,3}(?:,\d{3})+|\d+)"
         r"(?:\.(?P<cents>\d{2}))?",
         source_text,
     ):
@@ -8759,7 +8759,7 @@ def _guard_coverage_plan_money_values(
         return False
 
     amount_pattern = re.compile(
-        r"$(?:\d{1,3}(?:,\d{3})+|\d+)"
+        r"\$(?:\d{1,3}(?:,\d{3})+|\d+)"
         r"(?:\.\d{1,2})?"
     )
 
