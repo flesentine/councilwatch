@@ -3486,9 +3486,10 @@ def normalize_validated_warrant_register_name(
     )
 
     new_headline = re.sub(
-        r"\bWarrant register\b",
+        r"\bwarrant\s+register\b",
         "Warrant Register",
         new_headline,
+        flags=re.I,
     )
 
     if new_headline != story.headline:
