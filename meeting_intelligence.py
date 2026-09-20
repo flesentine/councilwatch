@@ -5999,7 +5999,206 @@ receive an action-ledger disposition grounded in the source evidence.
                 supplemental
             )
 
-    return cleaned
+    return _dedupe_action_ledger_rows(
+        cleaned
+    )
+
+
+def _dedupe_action_ledger_rows(
+    rows,
+):
+    """
+    Collapse only exact agenda-item/evidence duplicates.
+
+    Coverage topics and deterministic formal-agenda completeness can
+    legitimately produce two records for the same official item. If
+    those records ultimately resolve to the same item, section,
+    status, source, exact evidence, official title and linkage state,
+    they are one evidentiary assertion and should be represented once.
+
+    Distinct actions, distinct evidence, itemless topics and linkage
+    conflicts remain separate.
+    """
+    deduped = []
+    key_to_index = {}
+
+    for original in rows:
+        row = dict(
+            original
+        )
+
+        item_number = str(
+            row.get(
+                "item_number",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not item_number:
+            deduped.append(
+                row
+            )
+            continue
+
+        key = (
+            item_number,
+            _action_norm(
+                row.get(
+                    "agenda_section",
+                    "",
+                )
+            ),
+            _action_norm(
+                row.get(
+                    "action_status",
+                    "",
+                )
+            ),
+            _action_norm(
+                row.get(
+                    "evidence_source",
+                    "",
+                )
+            ),
+            _evidence_text_norm(
+                row.get(
+                    "evidence_quote",
+                    "",
+                )
+            ),
+            _action_norm(
+                row.get(
+                    "agenda_title",
+                    "",
+                )
+            ),
+            bool(
+                row.get(
+                    "agenda_linkage_conflict",
+                    False,
+                )
+            ),
+        )
+
+        if key not in key_to_index:
+            key_to_index[
+                key
+            ] = len(
+                deduped
+            )
+
+            deduped.append(
+                row
+            )
+            continue
+
+        index = key_to_index[
+            key
+        ]
+
+        existing = deduped[
+            index
+        ]
+
+        # Prefer the independently validated representation when
+        # duplicate model/checklist paths disagree only on validation.
+        if (
+            row.get(
+                "validated"
+            )
+            is True
+            and existing.get(
+                "validated"
+            )
+            is not True
+        ):
+            preferred = row
+            other = existing
+
+        else:
+            preferred = existing
+            other = row
+
+        merged = dict(
+            preferred
+        )
+
+        merged[
+            "evidence_item_numbers"
+        ] = sorted(
+            {
+                str(number)
+                for source_row
+                in (
+                    existing,
+                    row,
+                )
+                for number
+                in (
+                    source_row.get(
+                        "evidence_item_numbers",
+                        [],
+                    )
+                    or []
+                )
+                if str(
+                    number
+                ).strip()
+            },
+            key=_agenda_item_sort_key,
+        )
+
+        notes = []
+
+        for source_row in (
+            existing,
+            row,
+        ):
+            note = str(
+                source_row.get(
+                    "validation_note",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if (
+                note
+                and note
+                not in notes
+            ):
+                notes.append(
+                    note
+                )
+
+        merged[
+            "validation_note"
+        ] = " ".join(
+            notes
+        )
+
+        # If the nonpreferred duplicate carries a useful topic label
+        # while the preferred row is blank, preserve it.
+        if not str(
+            merged.get(
+                "topic",
+                "",
+            )
+            or ""
+        ).strip():
+            merged[
+                "topic"
+            ] = other.get(
+                "topic",
+                "",
+            )
+
+        deduped[
+            index
+        ] = merged
+
+    return deduped
 
 
 def retry_api_call(label, fn, max_attempts=4):
