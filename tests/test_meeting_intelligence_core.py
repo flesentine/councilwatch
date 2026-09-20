@@ -1,6 +1,8 @@
 import pytest
 
 from meeting_intelligence import (
+    CoverageItem,
+    CoveragePlan,
     _action_evidence_quote_is_bounded,
     _action_topic_component_labels,
     _action_topic_components,
@@ -28,6 +30,7 @@ from meeting_intelligence import (
     _evidence_text_norm,
     _formal_action_has_topic_support,
     _formal_status_supported,
+    _guard_coverage_plan_money_values,
     _local_topic_anchor_supported,
     _nonformal_source_supported,
     _quote_is_in_source,
@@ -645,6 +648,102 @@ def test_turn_window_formal_finality_requires_action_after_topic_identity():
         "passed",
         bad,
     )
+
+
+def test_turn_window_formal_finality_rejects_historical_action_after_identity():
+    topic = (
+        "Fiscal Year 2025-26 CDBG Consolidated Annual "
+        "Performance Evaluation Report"
+    )
+
+    candidate = (
+        "Tonight's presentation is the fiscal year 2025-26 consolidated "
+        "annual performance evaluation report. The city council adopted "
+        "the 2025-2030 consolidated plan last year on May 6th. The "
+        "activities are consistent with the annual action plan the city "
+        "council approved in May of 2025. Staff recommends the city "
+        "council adopt the associated resolution."
+    )
+
+    assert not _turn_window_formal_finality_supported(
+        topic,
+        "approved",
+        candidate,
+    )
+
+
+def test_turn_window_formal_finality_keeps_current_direct_action():
+    topic = "CDBG Consolidated Annual Performance Evaluation Report"
+
+    candidate = (
+        "The CDBG consolidated annual performance evaluation report "
+        "was presented. The council adopted the resolution tonight."
+    )
+
+    assert _turn_window_formal_finality_supported(
+        topic,
+        "adopted",
+        candidate,
+    )
+
+
+def test_coverage_money_guard_repairs_spaced_cents_model_error():
+    plan = CoveragePlan(
+        items=[
+            CoverageItem(
+                rank=1,
+                topic="Warrant Register and Legal Expenditures",
+                score=8,
+                category="Budget & Finance",
+                action_status="Approved",
+                summary=(
+                    "The council approved a $270,024 payment "
+                    "to legal counsel."
+                ),
+                why_it_matters="Tracks municipal spending.",
+                must_include=True,
+            )
+        ]
+    )
+
+    notes = (
+        "A speaker protested a check for $270,000 24 "
+        "written to legal counsel."
+    )
+
+    assert _guard_coverage_plan_money_values(
+        plan,
+        notes,
+        "",
+    )
+
+    assert "$270,000.24" in plan.items[0].summary
+    assert "$270,024" not in plan.items[0].summary
+
+
+def test_coverage_money_guard_does_not_snap_unrelated_amount():
+    plan = CoveragePlan(
+        items=[
+            CoverageItem(
+                rank=1,
+                topic="Budget",
+                score=8,
+                category="Budget & Finance",
+                action_status="Approved",
+                summary="The council approved $250,000.",
+                why_it_matters="Tracks municipal spending.",
+                must_include=True,
+            )
+        ]
+    )
+
+    assert not _guard_coverage_plan_money_values(
+        plan,
+        "The source discussed $270,000 24.",
+        "",
+    )
+
+    assert "$250,000" in plan.items[0].summary
 
 
 def test_best_supported_formal_action_quote_prefers_topic_specific_block():
