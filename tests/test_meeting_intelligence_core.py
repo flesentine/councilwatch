@@ -13,6 +13,7 @@ from meeting_intelligence import (
     _agenda_match_score,
     _agenda_section_from_heading,
     _best_supported_consent_action_quote,
+    _best_supported_consent_remainder_quote,
     _best_supported_formal_action_quote,
     _best_supported_raw_council_commentary_quote,
     _candidate_has_foreign_agenda_transition,
@@ -1000,3 +1001,147 @@ def test_dedupe_action_ledger_preserves_distinct_actions_and_itemless_rows():
     assert len(
         deduped
     ) == 3
+
+
+def test_consent_remainder_vote_applies_only_to_unpulled_official_items():
+    agenda_items = [
+        {
+            "item_number": "4.5",
+            "section": "CONSENT CALENDAR",
+            "title": "BUDGET REAPPROPRIATION",
+        },
+        {
+            "item_number": "4.7",
+            "section": "CONSENT CALENDAR",
+            "title": "CAPER",
+        },
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    notes = """
+### Consent Calendar Vote Audit
+Items explicitly pulled: Item 4.8
+Remainder motion: Motion to approve the remainder of the Consent Calendar.
+Remainder vote: Motion carried unanimously.
+Separate action: Item 4.8 — motion to approve; motion carried 4-0.
+"""
+
+    quote_45 = _best_supported_consent_remainder_quote(
+        "4.5",
+        agenda_items,
+        notes,
+    )
+
+    quote_47 = _best_supported_consent_remainder_quote(
+        "4.7",
+        agenda_items,
+        notes,
+    )
+
+    quote_48 = _best_supported_consent_remainder_quote(
+        "4.8",
+        agenda_items,
+        notes,
+    )
+
+    assert quote_45 is not None
+    assert quote_47 is not None
+    assert quote_48 is None
+
+
+def test_consent_remainder_vote_requires_explicit_pulled_items():
+    agenda_items = [
+        {
+            "item_number": "4.5",
+            "section": "CONSENT CALENDAR",
+            "title": "BUDGET",
+        },
+    ]
+
+    notes = """
+### Consent Calendar Vote Audit
+Remainder motion: Motion to approve the remainder of the Consent Calendar.
+Remainder vote: Motion carried unanimously.
+"""
+
+    assert _best_supported_consent_remainder_quote(
+        "4.5",
+        agenda_items,
+        notes,
+    ) is None
+
+
+def test_generic_consent_approval_does_not_become_remainder_evidence():
+    agenda_items = [
+        {
+            "item_number": "4.5",
+            "section": "CONSENT CALENDAR",
+            "title": "BUDGET",
+        },
+    ]
+
+    notes = """
+### Consent Calendar
+The Consent Calendar was approved unanimously.
+"""
+
+    assert _best_supported_consent_remainder_quote(
+        "4.5",
+        agenda_items,
+        notes,
+    ) is None
+
+
+def test_exact_consent_helper_does_not_borrow_remainder_vote_for_pulled_item():
+    agenda_items = [
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    notes = """
+### Consent Calendar Vote Audit
+Items explicitly pulled: Item 4.8
+Remainder motion: Motion to approve the remainder of the Consent Calendar.
+Remainder vote: Motion carried unanimously.
+"""
+
+    assert _best_supported_consent_action_quote(
+        "4.8",
+        agenda_items,
+        notes,
+    ) is None
+
+
+def test_exact_consent_helper_preserves_separate_pulled_item_vote():
+    agenda_items = [
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    notes = """
+### Consent Calendar Vote Audit
+Items explicitly pulled: Item 4.8
+Remainder motion: Motion to approve the remainder of the Consent Calendar.
+Remainder vote: Motion carried unanimously.
+Separate action: Motion to approve Item 4.8.
+Vote: Motion carried unanimously 4-0.
+"""
+
+    quote = _best_supported_consent_action_quote(
+        "4.8",
+        agenda_items,
+        notes,
+    )
+
+    assert quote is not None
+    assert "Motion to approve Item 4.8" in quote
