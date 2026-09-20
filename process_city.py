@@ -1412,6 +1412,43 @@ def normalize_validated_formal_status_language(
             value,
         )
 
+        # "Advanced" is common local-government summary language
+        # but does not identify the final disposition precisely.
+        # When this exact clause is already attributable to one
+        # validated formal action, canonicalize the narrow
+        # subject-verb form "Council ... advanced" to the ledger
+        # status. Do not rewrite adjectival uses such as
+        # "advanced technology".
+        def replace_advanced_action(
+            match,
+        ):
+            prefix = match.group(
+                "prefix"
+            )
+
+            replacement = past[
+                canonical_status
+            ]
+
+            return (
+                prefix
+                + replacement
+            )
+
+        cleaned = re.sub(
+            r"(?P<prefix>"
+            r"\b(?:the\s+)?"
+            r"(?:city\s+)?"
+            r"council"
+            r"(?:\s+also)?"
+            r"\s+"
+            r")"
+            r"advanced\b",
+            replace_advanced_action,
+            cleaned,
+            flags=re.I,
+        )
+
         # ----------------------------------------------------
         # Grammar cleanup for common contract language.
         # ----------------------------------------------------
