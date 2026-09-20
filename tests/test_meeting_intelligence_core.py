@@ -17,6 +17,7 @@ from meeting_intelligence import (
     _best_supported_raw_council_commentary_quote,
     _candidate_has_foreign_agenda_transition,
     _canonical_action_status,
+    _dedupe_action_ledger_rows,
     _canonical_agenda_section,
     _canonical_formal_status_from_quote,
     _conflicted_generic_collective_formal_action,
@@ -857,3 +858,145 @@ def test_unclear_may_remain_agenda_backed_without_claiming_treatment():
 )
 def test_action_status_is_closed_vocabulary(raw, expected):
     assert _canonical_action_status(raw) == expected
+
+
+def test_dedupe_action_ledger_collapses_exact_same_item_evidence():
+    rows = [
+        {
+            "topic": "CAPER",
+            "item_number": "4.7",
+            "agenda_section": "CONSENT CALENDAR",
+            "agenda_linkage_conflict": False,
+            "evidence_item_numbers": [],
+            "agenda_title": "ADOPTION OF CAPER",
+            "action_status": "unclear",
+            "evidence_source": "agenda",
+            "evidence_quote": "ADOPTION OF CAPER",
+            "validated": False,
+            "validation_note": "First validation reason.",
+        },
+        {
+            "topic": "ADOPTION OF CAPER",
+            "item_number": "4.7",
+            "agenda_section": "CONSENT CALENDAR",
+            "agenda_linkage_conflict": False,
+            "evidence_item_numbers": [],
+            "agenda_title": "ADOPTION OF CAPER",
+            "action_status": "unclear",
+            "evidence_source": "agenda",
+            "evidence_quote": "ADOPTION OF CAPER",
+            "validated": False,
+            "validation_note": "Second validation reason.",
+        },
+    ]
+
+    deduped = _dedupe_action_ledger_rows(
+        rows
+    )
+
+    assert len(
+        deduped
+    ) == 1
+
+    assert (
+        deduped[0][
+            "validation_note"
+        ]
+        == (
+            "First validation reason. "
+            "Second validation reason."
+        )
+    )
+
+
+def test_dedupe_action_ledger_prefers_validated_exact_duplicate():
+    rows = [
+        {
+            "topic": "Lease",
+            "item_number": "4.8",
+            "agenda_section": "CONSENT CALENDAR",
+            "agenda_linkage_conflict": False,
+            "evidence_item_numbers": [],
+            "agenda_title": "LEASE RENEWAL",
+            "action_status": "approved",
+            "evidence_source": "notes",
+            "evidence_quote": "Item 4.8 was approved.",
+            "validated": False,
+            "validation_note": "Earlier path failed validation.",
+        },
+        {
+            "topic": "LEASE RENEWAL",
+            "item_number": "4.8",
+            "agenda_section": "CONSENT CALENDAR",
+            "agenda_linkage_conflict": False,
+            "evidence_item_numbers": ["4.8"],
+            "agenda_title": "LEASE RENEWAL",
+            "action_status": "approved",
+            "evidence_source": "notes",
+            "evidence_quote": "Item 4.8 was approved.",
+            "validated": True,
+            "validation_note": "",
+        },
+    ]
+
+    deduped = _dedupe_action_ledger_rows(
+        rows
+    )
+
+    assert len(
+        deduped
+    ) == 1
+
+    assert (
+        deduped[0][
+            "validated"
+        ]
+        is True
+    )
+
+    assert deduped[0][
+        "evidence_item_numbers"
+    ] == [
+        "4.8",
+    ]
+
+
+def test_dedupe_action_ledger_preserves_distinct_actions_and_itemless_rows():
+    common = {
+        "item_number": "4.8",
+        "agenda_section": "CONSENT CALENDAR",
+        "agenda_linkage_conflict": False,
+        "evidence_item_numbers": [],
+        "agenda_title": "LEASE RENEWAL",
+        "evidence_source": "notes",
+        "evidence_quote": "Lease evidence.",
+        "validated": True,
+        "validation_note": "",
+    }
+
+    rows = [
+        {
+            **common,
+            "topic": "Lease",
+            "action_status": "approved",
+        },
+        {
+            **common,
+            "topic": "Privacy directive",
+            "action_status": "directed",
+        },
+        {
+            **common,
+            "topic": "Itemless privacy topic",
+            "item_number": "",
+            "action_status": "directed",
+        },
+    ]
+
+    deduped = _dedupe_action_ledger_rows(
+        rows
+    )
+
+    assert len(
+        deduped
+    ) == 3
