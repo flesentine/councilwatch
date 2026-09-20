@@ -3005,9 +3005,23 @@ def normalize_public_comment_ballot_scope(
                     0
                 )
 
+            trailing_clause = bool(
+                re.search(
+                    r",\s*$",
+                    match.group(
+                        0
+                    ),
+                )
+            )
+
             return (
                 "Measure "
                 + label
+                + (
+                    " "
+                    if trailing_clause
+                    else ""
+                )
             )
 
         cleaned = re.sub(
@@ -3016,7 +3030,8 @@ def normalize_public_comment_ballot_scope(
             r"(?:an?\s+)?"
             r"(?:ballot\s+)?measure"
             r"\s+(?:concerning|about|regarding|that\s+would|which\s+would)"
-            r"[^.;]*",
+            r"[^,.;]*"
+            r"(?:,\s*)?",
             replace_appositive,
             value,
             flags=re.I,
@@ -3195,7 +3210,20 @@ def enforce_publishable_person_names(
         r"))\s+"
         r"(?P<name>"
         r"[A-Z][A-Za-z'’\-]*"
-        r"(?:\s+[A-Z][A-Za-z'’\-]*)?"
+        r"(?:\s+"
+        r"(?!(?:"
+        r"Was|Were|Is|Are|Has|Had|"
+        r"Gives|Gave|Says|Said|Speaks|Spoke|"
+        r"Joins|Joined|Votes|Voted|"
+        r"Opposes|Opposed|Supports|Supported|"
+        r"Thanks|Thanked|Asks|Asked|"
+        r"Notes|Noted|Reports|Reported|"
+        r"Attends|Attended|Introduces|Introduced|"
+        r"Moves|Moved|Seconds|Seconded|"
+        r"Leaves|Left|Arrives|Arrived|"
+        r"Abstains|Abstained"
+        r")\b)"
+        r"[A-Z][A-Za-z'’\-]*)?"
         r")\b"
     )
 
