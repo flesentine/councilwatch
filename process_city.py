@@ -3032,8 +3032,14 @@ def normalize_public_comment_ballot_scope(
             r"\bMeasure\s+(?P<label>[A-Z])"
             r",\s+"
             r"(?:an?\s+)?"
+            r"(?:(?:proposed|local|council[-\s]initiated)\s+){0,3}"
             r"(?:ballot\s+)?measure"
-            r"\s+(?:concerning|about|regarding|that\s+would|which\s+would)"
+            r"\s+(?:"
+            r"concerning|about|regarding|addressing|"
+            r"focused\s+on|"
+            r"that\s+would|which\s+would|"
+            r"seeks?\s+to|proposes?\s+to"
+            r")"
             r"[^,.;]*"
             r"(?:,\s*)?",
             replace_appositive,
