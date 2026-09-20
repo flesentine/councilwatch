@@ -3684,31 +3684,87 @@ def _staff_followup_language_supported(
 ):
     """
     Require explicit staff-follow-up language.
+
+    "Respond" by itself is too weak because meeting-opening
+    boilerplate commonly says staff will respond only to Council
+    questions. Treat response language as requested follow-up only
+    when the same local text also contains a request/ask cue.
+
+    Explicit future work such as follow up, report back, return, or
+    look into remains sufficient when tied locally to staff.
     """
     normalized = _action_norm(
         value
     )
 
-    patterns = (
+    strong_action = (
+        r"(?:"
+        r"follow\s+up|"
+        r"followup|"
+        r"report\s+back|"
+        r"return|"
+        r"look\s+into"
+        r")"
+    )
+
+    strong_patterns = (
         r"\b(?:city\s+)?staff\b"
         r"[^.!?\n]{0,180}"
-        r"\b(?:"
-        r"follow\s+up|"
-        r"followup|"
-        r"respond|"
-        r"report\s+back|"
-        r"return|"
-        r"look\s+into"
-        r")\b",
+        r"\b"
+        + strong_action
+        + r"\b",
 
+        r"\b"
+        + strong_action
+        + r"\b"
+        r"[^.!?\n]{0,180}"
+        r"\b(?:city\s+)?staff\b",
+    )
+
+    if any(
+        re.search(
+            pattern,
+            normalized,
+            re.I,
+        )
+        for pattern in strong_patterns
+    ):
+        return True
+
+    # A response can be a follow-up, but only when someone actually
+    # asks/requests it. Procedural rules about who staff may respond
+    # to are not evidence that follow-up was requested.
+    if not re.search(
+        r"\brespond(?:s|ed|ing)?\b|"
+        r"\bresponse\b",
+        normalized,
+        re.I,
+    ):
+        return False
+
+    request_cue = re.search(
         r"\b(?:"
-        r"follow\s+up|"
-        r"followup|"
-        r"respond|"
-        r"report\s+back|"
-        r"return|"
-        r"look\s+into"
-        r")\b"
+        r"ask|asks|asked|asking|"
+        r"request|requests|requested|requesting|"
+        r"urge|urges|urged|urging|"
+        r"please|"
+        r"would\s+like|"
+        r"want|wants|wanted|"
+        r"can|could|would"
+        r")\b",
+        normalized,
+        re.I,
+    )
+
+    if not request_cue:
+        return False
+
+    response_patterns = (
+        r"\b(?:city\s+)?staff\b"
+        r"[^.!?\n]{0,180}"
+        r"\b(?:respond(?:s|ed|ing)?|response)\b",
+
+        r"\b(?:respond(?:s|ed|ing)?|response)\b"
         r"[^.!?\n]{0,180}"
         r"\b(?:city\s+)?staff\b",
     )
@@ -3719,7 +3775,7 @@ def _staff_followup_language_supported(
             normalized,
             re.I,
         )
-        for pattern in patterns
+        for pattern in response_patterns
     )
 
 

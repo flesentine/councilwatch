@@ -24,6 +24,43 @@ def test_staff_followup_language_requires_explicit_followup_action():
     )
 
 
+def test_staff_followup_language_rejects_procedural_response_boilerplate():
+    assert not _staff_followup_language_supported(
+        (
+            "Staff will only respond to questions from the city council, "
+            "not from public speakers."
+        )
+    )
+
+
+def test_staff_followup_language_allows_requested_staff_response():
+    assert _staff_followup_language_supported(
+        "The council asked staff to respond to the resident's concern."
+    )
+
+
+def test_local_staff_followup_rejects_public_comment_response_rules():
+    notes = _raw_transcript(
+        (
+            "At this time, the city council will convene to consider public "
+            "matters. Staff will only respond to questions from the city "
+            "council, not from public speakers."
+        ),
+        "The invocation was presented.",
+        "Public comments are now open.",
+        (
+            "A resident discussed Measure F term limits and opposed the "
+            "proposal."
+        ),
+        "Public comments are now closed.",
+    )
+
+    assert _best_supported_local_staff_followup_quote(
+        "Measure F Term Limits Discussion and Public Comment",
+        notes,
+    ) is None
+
+
 def test_local_public_comment_recovers_exact_commenter_turn_only_while_open():
     notes = _raw_transcript(
         "Mayor: We will now move on to public comments.",
