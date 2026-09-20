@@ -208,6 +208,69 @@ def test_formal_status_normalization_preserves_tense(draft_verb, expected_verb):
     assert draft_verb not in result or draft_verb == expected_verb
 
 
+def test_formal_status_normalization_canonicalizes_council_advanced():
+    story = make_story(
+        dek=(
+            "During the meeting, the City Council also advanced the "
+            "Consolidated Annual Performance and Evaluation Report."
+        )
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "2025-2026 Consolidated Annual Performance and Evaluation Report",
+                "approved",
+                agenda_title=(
+                    "Adoption of the 2025-2026 Consolidated Annual "
+                    "Performance and Evaluation Report"
+                ),
+                section="CONSENT CALENDAR",
+                item_number="4.7",
+            )
+        ]
+    }
+
+    assert pc.normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    )
+
+    assert "council also approved the" in story.dek.lower()
+    assert "advanced" not in story.dek.lower()
+
+
+def test_formal_status_normalization_does_not_rewrite_advanced_adjective():
+    original = (
+        "The Council approved an advanced traffic technology contract."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Advanced Traffic Technology Contract",
+                "approved",
+                agenda_title="Advanced Traffic Technology Contract",
+            )
+        ]
+    }
+
+    pc.normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
 def test_formal_status_normalization_handles_two_independent_clauses():
     story = make_story(
         dek=(
