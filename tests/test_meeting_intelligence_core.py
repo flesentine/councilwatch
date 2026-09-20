@@ -25,6 +25,7 @@ from meeting_intelligence import (
     _formal_action_has_topic_support,
     _formal_status_supported,
     _local_topic_anchor_supported,
+    _nonformal_source_supported,
     _quote_is_in_source,
     _raw_council_commentary_supported,
     _resolve_agenda_item,
@@ -810,3 +811,31 @@ def test_consent_action_quote_accepts_child_item_after_parent_heading():
         agenda_items,
         notes,
     ) is None
+
+
+def test_nonformal_treatment_requires_recording_derived_notes():
+    for status in (
+        "discussed",
+        "considered",
+        "requested staff follow-up",
+        "resident comment",
+        "public comment",
+        "speaker comment",
+        "no council action",
+    ):
+        assert _nonformal_source_supported(
+            status,
+            "notes",
+        )
+
+        assert not _nonformal_source_supported(
+            status,
+            "agenda",
+        )
+
+
+def test_unclear_may_remain_agenda_backed_without_claiming_treatment():
+    assert _nonformal_source_supported(
+        "unclear",
+        "agenda",
+    )
