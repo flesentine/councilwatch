@@ -2801,6 +2801,10 @@ def normalize_validated_cdbg_report_name(
             r"\b(?:annual\s+)?housing\s+performance\s+report\b",
             re.I,
         ),
+        re.compile(
+            r"\b(?:annual\s+)?federal\s+grant\s+performance\s+report\b",
+            re.I,
+        ),
     ]
 
     def scrub(value):
@@ -2865,6 +2869,438 @@ def normalize_validated_cdbg_report_name(
 
 
 
+def normalize_public_comment_ballot_scope(
+    story,
+    intelligence,
+):
+    """
+    Prevent public-comment discussion of one provision from
+    redefining the full scope of a ballot measure.
+
+    A validated formal action can establish measure scope for the
+    item it governs. Otherwise reader-facing copy may name the
+    measure and attribute what speakers said about a provision, but
+    it must not add an unverified appositive definition of the whole
+    measure.
+    """
+    formal_measure_labels = set()
+
+    for action in intelligence.get(
+        "action_ledger",
+        [],
+    ):
+        if (
+            action.get("validated") is not True
+            or str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            not in ACTION_FORMAL_STATUSES
+        ):
+            continue
+
+        identity = " ".join(
+            str(
+                action.get(
+                    field,
+                    "",
+                )
+                or ""
+            )
+            for field in (
+                "topic",
+                "agenda_title",
+                "evidence_quote",
+            )
+        )
+
+        for match in re.finditer(
+            r"\bMeasure\s+[A-Z0-9]+\b",
+            identity,
+            re.I,
+        ):
+            formal_measure_labels.add(
+                match.group(0).casefold()
+            )
+
+    scope_pattern = re.compile(
+        r"(?P<label>\bMeasure\s+[A-Z0-9]+\b)"
+        r"\s*,\s+"
+        r"(?:(?:an?|the)\s+)?"
+        r"(?:council[-\s]initiated\s+)?"
+        r"ballot\s+measure"
+        r"(?:\s+(?:that|which))?"
+        r"\s+(?:"
+        r"concerning|regarding|about|addressing|"
+        r"focused\s+on|"
+        r"seeks?\s+to|"
+        r"would|proposes?\s+to"
+        r")\s+"
+        r"[^,.;]+",
+        re.I,
+    )
+
+    def scrub(value):
+        value = str(
+            value or ""
+        )
+
+        def replace(match):
+            label = match.group(
+                "label"
+            )
+
+            if (
+                label.casefold()
+                in formal_measure_labels
+            ):
+                return match.group(0)
+
+            return label
+
+        return scope_pattern.sub(
+            replace,
+            value,
+        )
+
+    changed = False
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
+def enforce_role_labeled_person_whitelist(
+    story,
+    intelligence,
+):
+    """
+    Deterministically enforce the publishable-person whitelist for
+    role-labeled elected-official names.
+
+    If an observed role-labeled spelling was CORRECTED by the
+    verification layer, publish the exact canonical name. Otherwise
+    an unverified role-labeled name is reduced to a supported generic
+    role instead of leaking a transcript spelling into public copy.
+    """
+    def identity_key(value):
+        return " ".join(
+            re.findall(
+                r"[a-z0-9]+",
+                str(
+                    value or ""
+                ).casefold(),
+            )
+        )
+
+    verified_aliases = {}
+    corrected_aliases = {}
+
+    for entity in intelligence.get(
+        "entities",
+        [],
+    ):
+        if (
+            str(
+                entity.get(
+                    "entity_type",
+                    "",
+                )
+            ).strip().lower()
+            != "person"
+        ):
+            continue
+
+        status = str(
+            entity.get(
+                "status",
+                "",
+            )
+        ).strip().upper()
+
+        if status not in {
+            "VERIFIED",
+            "CORRECTED",
+        }:
+            continue
+
+        canonical = str(
+            entity.get(
+                "canonical_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        observed = str(
+            entity.get(
+                "observed_text",
+                "",
+            )
+            or ""
+        ).strip()
+
+        canonical_key = identity_key(
+            canonical
+        )
+
+        if not canonical_key:
+            continue
+
+        canonical_parts = (
+            canonical_key.split()
+        )
+
+        verified_aliases[
+            canonical_key
+        ] = canonical
+
+        if canonical_parts:
+            verified_aliases[
+                canonical_parts[-1]
+            ] = canonical
+
+        if status != "CORRECTED":
+            continue
+
+        observed_key = identity_key(
+            observed
+        )
+
+        if not observed_key:
+            continue
+
+        observed_parts = (
+            observed_key.split()
+        )
+
+        corrected_aliases[
+            observed_key
+        ] = canonical
+
+        if observed_parts:
+            corrected_aliases[
+                observed_parts[-1]
+            ] = canonical
+
+    role_pattern = re.compile(
+        r"(?P<role>"
+        r"Former\s+Mayor|"
+        r"Mayor\s+Pro\s+Tem|"
+        r"Vice\s+Mayor|"
+        r"Council\s+Member|"
+        r"Councilmember|"
+        r"Mayor"
+        r")"
+        r"\s+"
+        r"(?P<name>"
+        r"[A-Z][A-Za-z'’.-]*"
+        r"(?:\s+[A-Z][A-Za-z'’.-]*){0,2}"
+        r")\b"
+    )
+
+    protected_followers = {
+        "action",
+        "actions",
+        "comment",
+        "comments",
+        "discussion",
+        "discussions",
+        "meeting",
+        "meetings",
+        "report",
+        "reports",
+        "update",
+        "updates",
+    }
+
+    def generic_role(role):
+        role_key = identity_key(
+            role
+        )
+
+        if role_key == "former mayor":
+            return "a former mayor"
+
+        if role_key == "mayor pro tem":
+            return "the mayor pro tem"
+
+        if role_key == "vice mayor":
+            return "the vice mayor"
+
+        if role_key == "mayor":
+            return "the mayor"
+
+        return "a council member"
+
+    def scrub(value):
+        value = str(
+            value or ""
+        )
+
+        def replace(match):
+            role = match.group(
+                "role"
+            )
+
+            name = match.group(
+                "name"
+            )
+
+            name_key = identity_key(
+                name
+            )
+
+            if not name_key:
+                return match.group(0)
+
+            parts = name_key.split()
+
+            if (
+                parts
+                and parts[0]
+                in protected_followers
+            ):
+                return match.group(0)
+
+            last = (
+                parts[-1]
+                if parts
+                else ""
+            )
+
+            canonical = (
+                corrected_aliases.get(
+                    name_key
+                )
+                or corrected_aliases.get(
+                    last
+                )
+                or verified_aliases.get(
+                    name_key
+                )
+                or verified_aliases.get(
+                    last
+                )
+            )
+
+            if canonical:
+                return (
+                    role
+                    + " "
+                    + canonical
+                )
+
+            replacement = generic_role(
+                role
+            )
+
+            prefix = value[
+                :match.start()
+            ]
+
+            if (
+                not prefix.strip()
+                or re.search(
+                    r"[.!?]\s*$",
+                    prefix,
+                )
+            ):
+                replacement = (
+                    replacement[0].upper()
+                    + replacement[1:]
+                )
+
+            return replacement
+
+        return role_pattern.sub(
+            replace,
+            value,
+        )
+
+    changed = False
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -2885,6 +3321,18 @@ def normalize_validated_action_language(
     )
 
     if normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if normalize_public_comment_ballot_scope(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if enforce_role_labeled_person_whitelist(
         story,
         intelligence,
     ):
