@@ -1020,6 +1020,56 @@ def _action_topic_components(topic):
     return components
 
 
+
+ACTION_GENERIC_TOPIC_ANCHORS = {
+    "annual",
+    "balance",
+    "budget",
+    "finance",
+    "financial",
+    "fiscal",
+    "fund",
+    "meeting",
+    "report",
+    "reports",
+    "result",
+    "results",
+    "session",
+    "study",
+    "year",
+}
+
+
+def _topic_specific_overlap_supported(
+    topic_words,
+    evidence_words,
+):
+    """
+    Generic fiscal/report vocabulary may contribute to an overlap,
+    but it cannot by itself establish identity for a more specific
+    topic such as a reappropriation or CAPER item.
+    """
+    topic_words = set(topic_words)
+    evidence_words = set(evidence_words)
+
+    overlap = topic_words & evidence_words
+
+    if len(overlap) < 2:
+        return False
+
+    specific = (
+        topic_words
+        - ACTION_GENERIC_TOPIC_ANCHORS
+    )
+
+    if not specific:
+        return True
+
+    return bool(
+        overlap
+        & specific
+    )
+
 def _topic_scope_supported(
     topic,
     evidence,
@@ -1044,12 +1094,10 @@ def _topic_scope_supported(
         evidence
     )
 
-    total_overlap = len(
-        topic_words
-        & evidence_words
-    )
-
-    if total_overlap < 2:
+    if not _topic_specific_overlap_supported(
+        topic_words,
+        evidence_words,
+    ):
         return False
 
     components = (
@@ -1524,6 +1572,7 @@ def _action_words(value):
     ):
         if (
             len(word) < 4
+            or word.isdigit()
             or word in ACTION_STOPWORDS
         ):
             continue
@@ -1734,18 +1783,6 @@ def _best_supported_consent_action_quote(
         ):
             continue
 
-        cited = (
-            _evidence_agenda_item_numbers(
-                raw_line
-            )
-        )
-
-        if not (
-            cited
-            & labels
-        ):
-            continue
-
         block = [
             raw_line,
         ]
@@ -1815,6 +1852,18 @@ def _best_supported_consent_action_quote(
                 quote
             )
         )
+
+        # The parent Consent Calendar heading may identify only the
+        # section (for example "Item 4: Consent Calendar") while the
+        # immediately following source lines identify the exact child
+        # item (for example "Item 4.8: Lease Renewal"). Evaluate the
+        # complete bounded block before deciding whether it belongs
+        # to this official consent item.
+        if not (
+            quoted_numbers
+            & labels
+        ):
+            continue
 
         dotted_numbers = {
             number
