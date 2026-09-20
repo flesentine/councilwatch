@@ -3236,22 +3236,6 @@ def _local_topic_anchor_supported(
         )
     )
 
-    if identity:
-        matched_words = set(
-            identity[2]
-        )
-
-        # When the editorial topic contains specific subject words,
-        # at least one of them must occur in the local identity span.
-        # This prevents procedural "public comment" boilerplate from
-        # validating unrelated topics such as a named ballot measure.
-        if (
-            not specific_topic_words
-            or matched_words
-            & specific_topic_words
-        ):
-            return True
-
     topic_words = specific_topic_words
     candidate_words -= generic_words
 
@@ -3259,6 +3243,34 @@ def _local_topic_anchor_supported(
         topic_words
         & candidate_words
     )
+
+    if len(
+        topic_words
+    ) <= 2:
+        required = 1
+    elif len(
+        topic_words
+    ) <= 4:
+        required = 2
+    else:
+        required = 3
+
+    if identity:
+        matched_words = (
+            set(
+                identity[2]
+            )
+            & specific_topic_words
+        )
+
+        # A local identity cluster still needs enough SUBJECT-SPECIFIC
+        # words. Generic overlap such as "public safety" plus a
+        # contractor introduction cannot validate a Flock-camera
+        # topic that never mentions Flock/cameras/expenditures.
+        if len(
+            matched_words
+        ) >= required:
+            return True
 
     topic_norm = _action_norm(
         topic
@@ -3291,13 +3303,6 @@ def _local_topic_anchor_supported(
         and candidate_has_ebike
     ):
         overlap += 2
-
-    if len(
-        topic_words
-    ) <= 2:
-        required = 1
-    else:
-        required = 2
 
     return overlap >= required
 
@@ -4127,9 +4132,117 @@ def _turn_window_formal_finality_supported(
         re.I,
     )
 
+    def direct_match_is_current(
+        match,
+    ):
+        if match.start() < identity_end:
+            return False
+
+        # Inspect only the sentence containing the direct action.
+        # A source window can legitimately include background such as:
+        #
+        #   "the council approved the annual action plan in May 2025"
+        #   "the council adopted the consolidated plan last year"
+        #
+        # Those historical actions must not validate the disposition
+        # of the item being heard at the current meeting.
+        sentence_start = max(
+            normalized.rfind(
+                ".",
+                0,
+                match.start(),
+            ),
+            normalized.rfind(
+                "?",
+                0,
+                match.start(),
+            ),
+            normalized.rfind(
+                "!",
+                0,
+                match.start(),
+            ),
+        ) + 1
+
+        sentence_ends = [
+            position
+            for position in (
+                normalized.find(
+                    ".",
+                    match.end(),
+                ),
+                normalized.find(
+                    "?",
+                    match.end(),
+                ),
+                normalized.find(
+                    "!",
+                    match.end(),
+                ),
+            )
+            if position >= 0
+        ]
+
+        sentence_end = (
+            min(
+                sentence_ends
+            )
+            if sentence_ends
+            else len(
+                normalized
+            )
+        )
+
+        sentence = normalized[
+            sentence_start:
+            sentence_end
+        ]
+
+        retrospective = bool(
+            re.search(
+                r"\b(?:"
+                r"previously|"
+                r"earlier|"
+                r"last\s+(?:year|month|meeting|session)|"
+                r"prior\s+(?:year|month|meeting|session)"
+                r")\b",
+                sentence,
+                re.I,
+            )
+            or re.search(
+                r"\b(?:in|on)\s+"
+                r"(?:"
+                r"(?:january|february|march|april|may|june|"
+                r"july|august|september|october|november|december)"
+                r"(?:\s+\d{1,2}(?:st|nd|rd|th)?)?"
+                r"(?:\s+(?:of\s+)?20\d{2})?"
+                r"|20\d{2}"
+                r")\b",
+                sentence,
+                re.I,
+            )
+        )
+
+        if not retrospective:
+            return True
+
+        # Explicit current-meeting/result language can override a date
+        # reference, but bare historical background cannot.
+        return bool(
+            re.search(
+                r"\b(?:"
+                r"tonight|today|this\s+evening|"
+                r"that\s+motion|motion\s+(?:passes|passed|carries|carried)"
+                r")\b",
+                sentence,
+                re.I,
+            )
+        )
+
     direct_after_identity = any(
-        match.start()
-        >= identity_end
+        direct_match_is_current(
+            match
+        )
         for match in direct_pattern.finditer(
             normalized
         )
@@ -8545,6 +8658,202 @@ def _guard_conduit_financing_coverage_plan(
     return changed
 
 
+def _guard_coverage_plan_money_values(
+    plan,
+    notes,
+    agenda,
+):
+    """
+    Keep exact dollar figures in the editorial coverage plan tied to
+    source text.
+
+    Raw transcripts commonly render cents with a space, for example:
+
+        $270,000 24
+
+    A model can misread that as $270,024. Canonicalize spaced cents to
+    $270,000.24 and repair only a very-near unsupported coverage-plan
+    amount to the nearest source-supported amount.
+    """
+    source_text = (
+        str(
+            notes or ""
+        )
+        + "\n"
+        + str(
+            agenda or ""
+        )
+    )
+
+    source_values = []
+
+    def add_source_amount(
+        raw_dollars,
+        cents="",
+    ):
+        dollars = str(
+            raw_dollars or ""
+        ).replace(
+            ",",
+            "",
+        )
+
+        if not dollars.isdigit():
+            return
+
+        value = float(
+            dollars
+        )
+
+        if cents:
+            value += (
+                int(
+                    cents
+                )
+                / 100.0
+            )
+
+        display = (
+            f"${value:,.2f}"
+            if cents
+            else f"${value:,.0f}"
+        )
+
+        source_values.append(
+            (
+                value,
+                display,
+            )
+        )
+
+    for match in re.finditer(
+        r"$(?P<dollars>\d{1,3}(?:,\d{3})+|\d+)"
+        r"\s+(?P<cents>\d{2})(?!\d)",
+        source_text,
+    ):
+        add_source_amount(
+            match.group(
+                "dollars"
+            ),
+            match.group(
+                "cents"
+            ),
+        )
+
+    for match in re.finditer(
+        r"$(?P<dollars>\d{1,3}(?:,\d{3})+|\d+)"
+        r"(?:\.(?P<cents>\d{2}))?",
+        source_text,
+    ):
+        add_source_amount(
+            match.group(
+                "dollars"
+            ),
+            match.group(
+                "cents"
+            )
+            or "",
+        )
+
+    if not source_values:
+        return False
+
+    amount_pattern = re.compile(
+        r"$(?:\d{1,3}(?:,\d{3})+|\d+)"
+        r"(?:\.\d{1,2})?"
+    )
+
+    changed = False
+
+    for item in plan.items:
+        for field in (
+            "summary",
+            "why_it_matters",
+        ):
+            value = str(
+                getattr(
+                    item,
+                    field,
+                    "",
+                )
+                or ""
+            )
+
+            def replace_amount(
+                match,
+            ):
+                nonlocal changed
+
+                raw = match.group(
+                    0
+                )
+
+                try:
+                    numeric = float(
+                        raw[
+                            1:
+                        ].replace(
+                            ",",
+                            "",
+                        )
+                    )
+                except ValueError:
+                    return raw
+
+                if any(
+                    abs(
+                        numeric
+                        - source_value
+                    )
+                    < 0.005
+                    for source_value, _
+                    in source_values
+                ):
+                    return raw
+
+                source_value, display = min(
+                    source_values,
+                    key=lambda entry: abs(
+                        numeric
+                        - entry[0]
+                    ),
+                )
+
+                difference = abs(
+                    numeric
+                    - source_value
+                )
+
+                tolerance = max(
+                    1.0,
+                    abs(
+                        numeric
+                    )
+                    * 0.001,
+                )
+
+                if difference > tolerance:
+                    return raw
+
+                changed = True
+                return display
+
+            cleaned = amount_pattern.sub(
+                replace_amount,
+                value,
+            )
+
+            if cleaned != value:
+                setattr(
+                    item,
+                    field,
+                    cleaned,
+                )
+
+    return changed
+
+
+
 def build_coverage_plan(
     meeting,
     notes,
@@ -8747,6 +9056,12 @@ that a useful local story should not omit.
         agenda,
     )
 
+    _guard_coverage_plan_money_values(
+        plan,
+        notes,
+        agenda,
+    )
+
     return plan.model_dump()
 
 
@@ -8858,6 +9173,102 @@ def build_meeting_intelligence(
             "generation; failing closed."
         )
         raise
+
+    # The coverage planner ranks newsworthiness; the validated action
+    # ledger controls what actually happened. For exact topic matches,
+    # keep the review-facing coverage status synchronized with the
+    # single validated ledger disposition.
+    validated_statuses_by_topic = {}
+
+    for action in action_ledger:
+        if action.get(
+            "validated"
+        ) is not True:
+            continue
+
+        topic_key = _action_norm(
+            action.get(
+                "topic",
+                "",
+            )
+        )
+
+        status = _action_norm(
+            action.get(
+                "action_status",
+                "",
+            )
+        )
+
+        if (
+            not topic_key
+            or not status
+        ):
+            continue
+
+        validated_statuses_by_topic.setdefault(
+            topic_key,
+            set(),
+        ).add(
+            status
+        )
+
+    status_display = {
+        "approved": "Approved",
+        "adopted": "Adopted",
+        "authorized": "Authorized",
+        "awarded": "Awarded",
+        "directed": "Directed",
+        "rejected": "Rejected",
+        "denied": "Denied",
+        "appointed": "Appointed",
+        "accepted": "Accepted",
+        "passed": "Passed",
+        "discussed": "Discussed",
+        "considered": "Considered",
+        "requested staff follow-up": "Requested Staff Follow-up",
+        "resident comment": "Resident Comment",
+        "public comment": "Public Comment",
+        "speaker comment": "Speaker Comment",
+        "no council action": "No Council Action",
+        "unclear": "Unclear",
+    }
+
+    for item in coverage.get(
+        "items",
+        [],
+    ):
+        topic_key = _action_norm(
+            item.get(
+                "topic",
+                "",
+            )
+        )
+
+        statuses = (
+            validated_statuses_by_topic.get(
+                topic_key,
+                set(),
+            )
+        )
+
+        if len(
+            statuses
+        ) != 1:
+            continue
+
+        status = next(
+            iter(
+                statuses
+            )
+        )
+
+        item[
+            "action_status"
+        ] = status_display.get(
+            status,
+            status.title(),
+        )
 
     editorial = str(
         coverage.get(
