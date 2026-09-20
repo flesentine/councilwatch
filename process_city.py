@@ -2856,6 +2856,10 @@ def normalize_validated_cdbg_report_name(
             r"\b(?:annual\s+)?housing\s+performance\s+report\b",
             re.I,
         ),
+        re.compile(
+            r"\b(?:annual\s+)?federal\s+grant\s+performance\s+report\b",
+            re.I,
+        ),
     ]
 
     def scrub(value):

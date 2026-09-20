@@ -382,6 +382,37 @@ def test_cdbg_report_name_guard_replaces_generic_housing_label():
     assert "federal housing and infrastructure report" not in story.dek.lower()
 
 
+def test_cdbg_report_name_guard_replaces_generic_federal_grant_label():
+    story = make_story(
+        dek=(
+            "The council adopted the annual federal grant "
+            "performance report."
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title=(
+                    "Consolidated Annual Performance Evaluation Report "
+                    "for the Community Development Block Grant Program"
+                ),
+            )
+        ]
+    }
+
+    assert pc.normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    )
+
+    assert story.dek == (
+        "The council adopted the CDBG performance report."
+    )
+
+
 def test_cdbg_report_name_guard_requires_validated_cdbg_identity():
     original = "Council Adopts Housing Performance Report"
     story = make_story(
