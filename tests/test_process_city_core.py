@@ -662,12 +662,12 @@ def test_ballot_scope_guard_scrubs_all_public_fields_and_term_limit_alias():
     )
 
     assert story.headline == "Measure F"
-    assert story.dek == "Measure F, drew public comment."
+    assert story.dek == "Measure F drew public comment."
     assert story.body == [
         "Residents discussed Measure F."
     ]
     assert story.key_facts == [
-        "Measure F, was criticized by speakers."
+        "Measure F was criticized by speakers."
     ]
 
 
