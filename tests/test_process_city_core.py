@@ -271,6 +271,141 @@ def test_formal_status_normalization_does_not_rewrite_advanced_adjective():
     ]
 
 
+def test_formal_status_normalization_canonicalizes_certified_warrant_register():
+    story = make_story(
+        headline=(
+            "Lake Forest City Council Adopts CDBG Performance Report "
+            "and Certifies Warrant Register"
+        ),
+        dek=(
+            "The council adopted the CDBG performance report and "
+            "certified the warrant register."
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title=(
+                    "Consolidated Annual Performance Evaluation Report "
+                    "for the Community Development Block Grant Program"
+                ),
+            ),
+            action(
+                "Warrant Register Approval",
+                "approved",
+                agenda_title="Warrant Register",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    )
+
+    assert "Approves Warrant Register" in story.headline
+    assert "approved the warrant register" in story.dek.lower()
+    assert "certif" not in (
+        story.headline
+        + " "
+        + story.dek
+    ).lower()
+
+
+def test_formal_status_normalization_keeps_advanced_adjective_in_coordination():
+    original = (
+        "The Council approved the signal contract and advanced "
+        "traffic technology specifications."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Advanced Traffic Technology Specifications",
+                "approved",
+                agenda_title="Advanced Traffic Technology Specifications",
+            )
+        ]
+    }
+
+    pc.normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
+def test_cdbg_report_name_guard_replaces_generic_housing_label():
+    story = make_story(
+        headline=(
+            "Lake Forest Council Adopts Housing Performance Report"
+        ),
+        dek=(
+            "The council adopted the annual federal housing and "
+            "infrastructure report."
+        ),
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title=(
+                    "Consolidated Annual Performance Evaluation Report "
+                    "for the Community Development Block Grant Program"
+                ),
+            )
+        ]
+    }
+
+    assert pc.normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    )
+
+    assert "CDBG Performance Report" in story.headline
+    assert "CDBG performance report" in story.dek
+    assert "housing performance report" not in story.headline.lower()
+    assert "federal housing and infrastructure report" not in story.dek.lower()
+
+
+def test_cdbg_report_name_guard_requires_validated_cdbg_identity():
+    original = "Council Adopts Housing Performance Report"
+    story = make_story(
+        headline=original,
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Housing Performance Report",
+                "adopted",
+                agenda_title="Housing Performance Report",
+            )
+        ]
+    }
+
+    assert not pc.normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == original
+
+
 def test_formal_status_normalization_handles_two_independent_clauses():
     story = make_story(
         dek=(
