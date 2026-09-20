@@ -2142,6 +2142,68 @@ def _best_supported_consent_remainder_quote(
     return None
 
 
+def _ledger_agenda_linkage_conflict(
+    item_number,
+    agenda_section,
+    evidence_item_numbers,
+    agenda_items,
+    *,
+    consent_remainder=False,
+):
+    """
+    Decide whether explicit source item numbers contradict the
+    official agenda mapping for one ledger row.
+
+    For a validated remainder-of-Consent vote, source item numbers
+    identify pulled/excluded items. They are therefore expected to
+    differ from each target item that remained in the collective
+    motion and must not be treated as a linkage conflict.
+    """
+    item_number = str(
+        item_number or ""
+    ).strip()
+
+    agenda_section = str(
+        agenda_section or ""
+    ).strip().upper()
+
+    evidence_item_numbers = {
+        str(number).strip()
+        for number in (
+            evidence_item_numbers
+            or []
+        )
+        if str(number).strip()
+    }
+
+    if (
+        not item_number
+        or not evidence_item_numbers
+    ):
+        return False
+
+    if (
+        consent_remainder
+        and agenda_section
+        == "CONSENT CALENDAR"
+    ):
+        return False
+
+    if item_number in evidence_item_numbers:
+        return False
+
+    if agenda_section == "CONSENT CALENDAR":
+        labels = _consent_item_source_labels(
+            item_number,
+            agenda_items,
+        )
+
+        if labels & evidence_item_numbers:
+            return False
+
+    return True
+
+
 def _best_supported_consent_action_quote(
     item_number,
     agenda_items,
@@ -5411,6 +5473,7 @@ receive an action-ledger disposition grounded in the source evidence.
         # New Business item from a generic Consent vote.
 
         consent_action_quote = None
+        consent_remainder_quote = None
 
         if (
             agenda_item
@@ -5426,12 +5489,16 @@ receive an action-ledger disposition grounded in the source evidence.
             )
 
             if not consent_action_quote:
-                consent_action_quote = (
+                consent_remainder_quote = (
                     _best_supported_consent_remainder_quote(
                         item_number,
                         agenda_items,
                         notes,
                     )
+                )
+
+                consent_action_quote = (
+                    consent_remainder_quote
                 )
 
             if (
@@ -5442,6 +5509,7 @@ receive an action-ledger disposition grounded in the source evidence.
                 )
             ):
                 consent_action_quote = None
+                consent_remainder_quote = None
 
         if consent_action_quote:
             status = "approved"
@@ -6215,36 +6283,35 @@ receive an action-ledger disposition grounded in the source evidence.
         # Calendar items. A Public Hearing item 21 paired with
         # source evidence for items 17/18 remains a conflict.
 
-        evidence_matches_item = bool(
-            item_number
-            and item_number
-            in evidence_item_numbers
+        agenda_linkage_conflict = (
+            _ledger_agenda_linkage_conflict(
+                item_number,
+                agenda_section,
+                evidence_item_numbers,
+                agenda_items,
+                consent_remainder=bool(
+                    consent_remainder_quote
+                ),
+            )
         )
 
-        if (
-            not evidence_matches_item
-            and item_number
-            and agenda_section
-            == "CONSENT CALENDAR"
-            and evidence_item_numbers
-        ):
-            consent_labels = (
-                _consent_item_source_labels(
-                    item_number,
-                    agenda_items,
+        if consent_remainder_quote:
+            remainder_note = (
+                "Collective Consent Calendar remainder approval "
+                "recovered from recording-derived notes. Explicit "
+                "item numbers in this excerpt identify pulled/"
+                "excluded items, not the target item that remained "
+                "in the collective motion."
+            )
+
+            validation_note = (
+                (
+                    validation_note.rstrip()
+                    + " "
                 )
-            )
-
-            evidence_matches_item = bool(
-                consent_labels
-                & evidence_item_numbers
-            )
-
-        agenda_linkage_conflict = bool(
-            item_number
-            and evidence_item_numbers
-            and not evidence_matches_item
-        )
+                if validation_note
+                else ""
+            ) + remainder_note
 
         if agenda_linkage_conflict:
             conflict_note = (
