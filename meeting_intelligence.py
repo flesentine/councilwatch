@@ -5324,6 +5324,75 @@ def _best_supported_staff_followup_quote(
     return candidates[0][1]
 
 
+def _formal_action_record_supported(
+    *,
+    topic,
+    status,
+    source_name,
+    quote,
+    quote_valid,
+    notes,
+    agenda_title,
+    item_number,
+    agenda_section,
+    agenda_items,
+    consent_action_quote=None,
+):
+    """
+    Single authoritative validation gate for a formal action record.
+
+    Raw-transcript formal actions must satisfy current-meeting
+    finality, not merely contain a historical approval/adoption in
+    the same evidence window.
+    """
+    if consent_action_quote:
+        return (
+            source_name == "notes"
+            and quote_valid
+        )
+
+    if not (
+        source_name == "notes"
+        and quote_valid
+        and _agenda_identity_supported_for_source(
+            topic,
+            agenda_title,
+            quote,
+            notes,
+        )
+        and _formal_action_has_topic_support(
+            topic,
+            item_number,
+            quote,
+            status,
+        )
+        and not _conflicted_generic_collective_formal_action(
+            item_number,
+            agenda_section,
+            status,
+            quote,
+            agenda_items,
+        )
+    ):
+        return False
+
+    if (
+        _single_line_transcript_turn_windows(
+            notes
+        )
+        and not _turn_window_formal_finality_supported(
+            topic,
+            status,
+            quote,
+            agenda_title=agenda_title,
+        )
+    ):
+        return False
+
+    return True
+
+
+
 def build_action_ledger(
     meeting,
     notes,
@@ -5774,29 +5843,18 @@ receive an action-ledger disposition grounded in the source evidence.
             and not consent_action_quote
         ):
             current_formal_supported = (
-                quote_valid
-                and _agenda_identity_supported_for_source(
-                    topic,
-                    agenda_title,
-                    quote,
-                    notes,
-                )
-                and _formal_action_has_topic_support(
-                    topic,
-                    item_number,
-                    quote,
-                    status,
-                )
-                and (
-                    not _single_line_transcript_turn_windows(
-                        notes
-                    )
-                    or _turn_window_formal_finality_supported(
-                        topic,
-                        status,
-                        quote,
-                        agenda_title=agenda_title,
-                    )
+                _formal_action_record_supported(
+                    topic=topic,
+                    status=status,
+                    source_name=source_name,
+                    quote=quote,
+                    quote_valid=quote_valid,
+                    notes=notes,
+                    agenda_title=agenda_title,
+                    item_number=item_number,
+                    agenda_section=agenda_section,
+                    agenda_items=agenda_items,
+                    consent_action_quote=None,
                 )
             )
 
@@ -6154,45 +6212,21 @@ receive an action-ledger disposition grounded in the source evidence.
         formal_valid = True
 
         if formal:
-            # An agenda listing alone never proves a final
-            # formal council disposition.
-            #
-            # A source-identified Consent Calendar approval block
-            # is different: the recording notes establish the
-            # collective vote, and the official agenda supplies
-            # the deterministic item identity/section mapping.
-            if consent_action_quote:
-                formal_valid = (
-                    source_name == "notes"
-                    and quote_valid
+            formal_valid = (
+                _formal_action_record_supported(
+                    topic=topic,
+                    status=status,
+                    source_name=source_name,
+                    quote=quote,
+                    quote_valid=quote_valid,
+                    notes=notes,
+                    agenda_title=agenda_title,
+                    item_number=item_number,
+                    agenda_section=agenda_section,
+                    agenda_items=agenda_items,
+                    consent_action_quote=consent_action_quote,
                 )
-
-            else:
-                formal_valid = (
-                    source_name == "notes"
-                    and quote_valid
-                    and _agenda_identity_supported_for_source(
-                        topic,
-                        agenda_title,
-                        quote,
-                        notes,
-                    )
-                    and _formal_action_has_topic_support(
-                        topic,
-                        item_number,
-                        quote,
-                        status,
-                    )
-                    and not (
-                        _conflicted_generic_collective_formal_action(
-                            item_number,
-                            agenda_section,
-                            status,
-                            quote,
-                            agenda_items,
-                        )
-                    )
-                )
+            )
 
         nonformal_valid = (
             _nonformal_source_supported(
