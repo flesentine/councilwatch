@@ -29,6 +29,7 @@ from meeting_intelligence import (
     _evidence_agenda_item_numbers,
     _evidence_text_norm,
     _formal_action_has_topic_support,
+    _formal_action_record_supported,
     _formal_status_supported,
     _guard_coverage_plan_money_values,
     _local_topic_anchor_supported,
@@ -647,6 +648,89 @@ def test_turn_window_formal_finality_requires_action_after_topic_identity():
         topic,
         "passed",
         bad,
+    )
+
+
+def test_formal_action_record_gate_rejects_historical_raw_action():
+    topic = (
+        "FY 2025-26 Community Development Block Grant "
+        "Consolidated Annual Performance Evaluation Report"
+    )
+
+    quote = (
+        "Tonight's presentation is the fiscal year 2025-26 community "
+        "development block grant consolidated annual performance "
+        "evaluation report. The annual action plan the city council "
+        "approved in May of 2025 remains in effect. Staff recommends "
+        "the city council adopt the associated resolution."
+    )
+
+    notes = " >> ".join(
+        [
+            quote,
+            "filler 1",
+            "filler 2",
+            "filler 3",
+            "filler 4",
+            "filler 5",
+            "filler 6",
+            "filler 7",
+            "filler 8",
+            "filler 9",
+        ]
+    )
+
+    assert not _formal_action_record_supported(
+        topic=topic,
+        status="approved",
+        source_name="notes",
+        quote=quote,
+        quote_valid=True,
+        notes=notes,
+        agenda_title="",
+        item_number="",
+        agenda_section="",
+        agenda_items=[],
+        consent_action_quote=None,
+    )
+
+
+def test_formal_action_record_gate_accepts_current_raw_motion():
+    topic = "CDBG Consolidated Annual Performance Evaluation Report"
+
+    quote = (
+        "The CDBG consolidated annual performance evaluation report "
+        "was presented. The council moved to adopt the report. "
+        "The motion passed 4-0."
+    )
+
+    notes = " >> ".join(
+        [
+            quote,
+            "filler 1",
+            "filler 2",
+            "filler 3",
+            "filler 4",
+            "filler 5",
+            "filler 6",
+            "filler 7",
+            "filler 8",
+            "filler 9",
+        ]
+    )
+
+    assert _formal_action_record_supported(
+        topic=topic,
+        status="adopted",
+        source_name="notes",
+        quote=quote,
+        quote_valid=True,
+        notes=notes,
+        agenda_title="",
+        item_number="",
+        agenda_section="",
+        agenda_items=[],
+        consent_action_quote=None,
     )
 
 
