@@ -587,6 +587,90 @@ def test_person_name_guard_preserves_exact_verified_canonical_name():
     ]
 
 
+def test_person_name_guard_generalizes_roles_across_all_public_fields():
+    story = make_story(
+        headline="Mayor Smith Gives Update",
+        dek="Vice Mayor Jones joined the discussion.",
+        body=[
+            "Mayor Pro Tem Roe was absent.",
+        ],
+        key_facts=[
+            "Councilmember Doe spoke during comments.",
+        ],
+    )
+
+    intelligence = {
+        "entities": [
+            {
+                "entity_type": "person",
+                "status": "UNVERIFIED",
+                "observed_text": "Smith",
+                "canonical_text": "Smith",
+                "official_source_url": "",
+            },
+            {
+                "entity_type": "organization",
+                "status": "VERIFIED",
+                "observed_text": "Doe",
+                "canonical_text": "Doe",
+                "official_source_url": "https://example.gov",
+            },
+        ]
+    }
+
+    assert pc.enforce_publishable_person_names(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == "The mayor Gives Update"
+    assert story.dek == "The vice mayor joined the discussion."
+    assert story.body == [
+        "The mayor pro tem was absent."
+    ]
+    assert story.key_facts == [
+        "A council member spoke during comments."
+    ]
+
+
+def test_ballot_scope_guard_scrubs_all_public_fields_and_term_limit_alias():
+    story = make_story(
+        headline="Measure F, a term-limit ballot measure",
+        dek=(
+            "Measure F, a ballot measure concerning municipal "
+            "term limits, drew public comment."
+        ),
+        body=[
+            (
+                "Residents discussed Measure F, a measure regarding "
+                "municipal term limits."
+            )
+        ],
+        key_facts=[
+            (
+                "Measure F, a ballot measure about municipal term "
+                "limits, was criticized by speakers."
+            )
+        ],
+    )
+
+    assert pc.normalize_public_comment_ballot_scope(
+        story,
+        {
+            "action_ledger": [],
+        },
+    )
+
+    assert story.headline == "Measure F"
+    assert story.dek == "Measure F, drew public comment."
+    assert story.body == [
+        "Residents discussed Measure F."
+    ]
+    assert story.key_facts == [
+        "Measure F, was criticized by speakers."
+    ]
+
+
 def test_formal_status_normalization_handles_two_independent_clauses():
     story = make_story(
         dek=(
