@@ -1192,6 +1192,73 @@ def normalize_validated_formal_status_language(
 
         return replacement
 
+    noncanonical_action_pattern = re.compile(
+        r"(?P<prefix>"
+        r"(?:\b(?:the\s+)?(?:city\s+)?council(?:\s+also)?\s+)"
+        r"|(?:[,;]\s+)"
+        r"|(?:\band\s+)"
+        r")"
+        r"(?P<verb>"
+        r"advance|advances|advanced|advancing|"
+        r"certify|certifies|certified|certifying|"
+        r"ratify|ratifies|ratified|ratifying"
+        r")\b",
+        re.I,
+    )
+
+    def noncanonical_replacement_word(
+        original,
+        canonical_status,
+    ):
+        low = original.lower()
+
+        if low.endswith(
+            "ing"
+        ):
+            replacement = progressive[
+                canonical_status
+            ]
+
+        elif (
+            low.endswith(
+                "ies"
+            )
+            or low.endswith(
+                "s"
+            )
+        ):
+            replacement = present[
+                canonical_status
+            ]
+
+        elif (
+            low.endswith(
+                "ied"
+            )
+            or low.endswith(
+                "ed"
+            )
+        ):
+            replacement = past[
+                canonical_status
+            ]
+
+        else:
+            replacement = infinitive[
+                canonical_status
+            ]
+
+        if (
+            original
+            and original[0].isupper()
+        ):
+            replacement = (
+                replacement[0].upper()
+                + replacement[1:]
+            )
+
+        return replacement
+
     def matching_actions(
         value,
     ):
@@ -1248,6 +1315,146 @@ def normalize_validated_formal_status_language(
             )
 
         return matched
+
+
+    def normalize_noncanonical_actions(
+        value,
+    ):
+        """
+        Canonicalize a small set of common but non-ledger action
+        verbs when the local phrase maps unambiguously to one
+        validated formal action.
+
+        The local-phrase check prevents one action in a multi-action
+        headline/dek from borrowing another action's status.
+        """
+        value = str(
+            value or ""
+        )
+
+        matches = list(
+            noncanonical_action_pattern.finditer(
+                value
+            )
+        )
+
+        if not matches:
+            return value
+
+        cleaned = value
+
+        # Rewrite from right to left so offsets remain stable.
+        for match in reversed(
+            matches
+        ):
+            verb = match.group(
+                "verb"
+            )
+
+            # "advanced" is also a common adjective. Require an
+            # explicit Council subject for that form.
+            if (
+                verb.lower()
+                in {
+                    "advance",
+                    "advances",
+                    "advanced",
+                    "advancing",
+                }
+                and "council" not in match.group(
+                    "prefix"
+                ).lower()
+            ):
+                continue
+
+            tail_start = match.end(
+                "verb"
+            )
+
+            tail = cleaned[
+                tail_start:
+            ]
+
+            boundary = re.search(
+                r"(?:(?:[,;.]\s+)|"
+                r"(?:\band\s+))"
+                r"(?=(?:the\s+)?(?:city\s+)?council\s+|"
+                r"(?:approve|approves|approved|approving|"
+                r"adopt|adopts|adopted|adopting|"
+                r"authorize|authorizes|authorized|authorizing|"
+                r"award|awards|awarded|awarding|"
+                r"direct|directs|directed|directing|"
+                r"reject|rejects|rejected|rejecting|"
+                r"deny|denies|denied|denying|"
+                r"appoint|appoints|appointed|appointing|"
+                r"accept|accepts|accepted|accepting|"
+                r"pass|passes|passed|passing|"
+                r"advance|advances|advanced|advancing|"
+                r"certify|certifies|certified|certifying|"
+                r"ratify|ratifies|ratified|ratifying)\b)",
+                tail,
+                re.I,
+            )
+
+            local_tail = (
+                tail[
+                    :boundary.start()
+                ]
+                if boundary
+                else tail
+            )
+
+            local_value = (
+                verb
+                + local_tail
+            )
+
+            local_matches = matching_actions(
+                local_value
+            )
+
+            local_statuses = {
+                str(
+                    action.get(
+                        "action_status",
+                        "",
+                    )
+                ).strip().lower()
+                for action, _ in local_matches
+            }
+
+            if len(
+                local_statuses
+            ) != 1:
+                continue
+
+            local_status = next(
+                iter(
+                    local_statuses
+                )
+            )
+
+            replacement = (
+                noncanonical_replacement_word(
+                    verb,
+                    local_status,
+                )
+            )
+
+            start = match.start(
+                "verb"
+            )
+            end = match.end(
+                "verb"
+            )
+
+            cleaned = (
+                cleaned[:start]
+                + replacement
+                + cleaned[end:]
+            )
+
+        return cleaned
 
 
     def normalize_segment(
@@ -1412,43 +1619,6 @@ def normalize_validated_formal_status_language(
             value,
         )
 
-        # "Advanced" is common local-government summary language
-        # but does not identify the final disposition precisely.
-        # When this exact clause is already attributable to one
-        # validated formal action, canonicalize the narrow
-        # subject-verb form "Council ... advanced" to the ledger
-        # status. Do not rewrite adjectival uses such as
-        # "advanced technology".
-        def replace_advanced_action(
-            match,
-        ):
-            prefix = match.group(
-                "prefix"
-            )
-
-            replacement = past[
-                canonical_status
-            ]
-
-            return (
-                prefix
-                + replacement
-            )
-
-        cleaned = re.sub(
-            r"(?P<prefix>"
-            r"\b(?:the\s+)?"
-            r"(?:city\s+)?"
-            r"council"
-            r"(?:\s+also)?"
-            r"\s+"
-            r")"
-            r"advanced\b",
-            replace_advanced_action,
-            cleaned,
-            flags=re.I,
-        )
-
         # ----------------------------------------------------
         # Grammar cleanup for common contract language.
         # ----------------------------------------------------
@@ -1535,6 +1705,10 @@ def normalize_validated_formal_status_language(
     ):
         value = str(
             value or ""
+        )
+
+        value = normalize_noncanonical_actions(
+            value
         )
 
         matched = matching_actions(
@@ -2554,6 +2728,143 @@ def reconcile_entity_verification_notes(
     return True
 
 
+def normalize_validated_cdbg_report_name(
+    story,
+    intelligence,
+):
+    """
+    Keep reader-facing shorthand for a validated CDBG/CAPER report
+    faithful to the official action identity.
+
+    The writer may shorten a long official title, but it must not
+    relabel the report as a generic "housing performance report" or
+    "federal housing and infrastructure report", which narrows or
+    broadens the official scope.
+
+    This guard activates only when a validated action identity itself
+    establishes both the CDBG program and a performance/CAPER report.
+    """
+    actions = [
+        action
+        for action in intelligence.get(
+            "action_ledger",
+            [],
+        )
+        if (
+            action.get("validated") is True
+            and not action.get(
+                "agenda_linkage_conflict"
+            )
+        )
+    ]
+
+    def identity_text(action):
+        return " ".join(
+            str(
+                action.get(field, "")
+                or ""
+            )
+            for field in (
+                "topic",
+                "agenda_title",
+                "evidence_quote",
+            )
+        )
+
+    supported = any(
+        (
+            re.search(
+                r"\b(?:cdbg|community\s+development\s+block\s+grant)\b",
+                identity_text(action),
+                re.I,
+            )
+            and re.search(
+                r"\b(?:caper|performance(?:\s+and\s+evaluation)?\s+report|"
+                r"consolidated\s+annual\s+performance)\b",
+                identity_text(action),
+                re.I,
+            )
+        )
+        for action in actions
+    )
+
+    if not supported:
+        return False
+
+    patterns = [
+        re.compile(
+            r"\b(?:annual\s+)?federal\s+housing\s+and\s+"
+            r"infrastructure\s+report\b",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?:annual\s+)?housing\s+performance\s+report\b",
+            re.I,
+        ),
+    ]
+
+    def scrub(value):
+        value = str(
+            value or ""
+        )
+
+        cleaned = value
+
+        for pattern in patterns:
+            cleaned = pattern.sub(
+                "CDBG performance report",
+                cleaned,
+            )
+
+        return cleaned
+
+    changed = False
+
+    new_headline = scrub(
+        story.headline
+    )
+
+    # Preserve normal headline capitalization.
+    new_headline = re.sub(
+        r"\bCDBG performance report\b",
+        "CDBG Performance Report",
+        new_headline,
+    )
+
+    if new_headline != story.headline:
+        story.headline = new_headline
+        changed = True
+
+    new_dek = scrub(
+        story.dek
+    )
+
+    if new_dek != story.dek:
+        story.dek = new_dek
+        changed = True
+
+    new_body = [
+        scrub(paragraph)
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(fact)
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -2572,6 +2883,12 @@ def normalize_validated_action_language(
             intelligence,
         )
     )
+
+    if normalize_validated_cdbg_report_name(
+        story,
+        intelligence,
+    ):
+        changed = True
 
     if _remove_validated_unclear_formal_claims(
         story,
