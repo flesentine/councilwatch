@@ -112,6 +112,34 @@ def test_local_staff_followup_rejects_measure_f_procedural_boilerplate():
     ) is None
 
 
+def test_local_topic_anchor_rejects_staff_intro_for_flock_camera_topic():
+    from meeting_intelligence import _local_topic_anchor_supported
+
+    topic = (
+        "Flock Safety Camera Contract and Public Safety Expenditures"
+    )
+
+    unrelated = (
+        "A new employee has contractor experience and previously "
+        "worked in public safety and community engagement."
+    )
+
+    assert not _local_topic_anchor_supported(
+        topic,
+        unrelated,
+    )
+
+    supported = (
+        "A resident questioned Flock Safety camera expenditures "
+        "and the annual contract cost."
+    )
+
+    assert _local_topic_anchor_supported(
+        topic,
+        supported,
+    )
+
+
 def test_local_public_comment_recovers_exact_commenter_turn_only_while_open():
     notes = _raw_transcript(
         "Mayor: We will now move on to public comments.",
