@@ -19,6 +19,7 @@ from meeting_intelligence import (
     _candidate_has_foreign_agenda_transition,
     _canonical_action_status,
     _dedupe_action_ledger_rows,
+    _ledger_agenda_linkage_conflict,
     _canonical_agenda_section,
     _canonical_formal_status_from_quote,
     _conflicted_generic_collective_formal_action,
@@ -1145,3 +1146,84 @@ Vote: Motion carried unanimously 4-0.
 
     assert quote is not None
     assert "Motion to approve Item 4.8" in quote
+
+
+def test_remainder_consent_exclusion_item_numbers_are_not_linkage_conflicts():
+    agenda_items = [
+        {
+            "item_number": "4.5",
+            "section": "CONSENT CALENDAR",
+            "title": "BUDGET REAPPROPRIATION",
+        },
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    assert not _ledger_agenda_linkage_conflict(
+        "4.5",
+        "CONSENT CALENDAR",
+        {"4.8"},
+        agenda_items,
+        consent_remainder=True,
+    )
+
+
+def test_nonremainder_consent_foreign_item_number_remains_conflict():
+    agenda_items = [
+        {
+            "item_number": "4.5",
+            "section": "CONSENT CALENDAR",
+            "title": "BUDGET REAPPROPRIATION",
+        },
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    assert _ledger_agenda_linkage_conflict(
+        "4.5",
+        "CONSENT CALENDAR",
+        {"4.8"},
+        agenda_items,
+        consent_remainder=False,
+    )
+
+
+def test_exact_consent_item_number_is_not_linkage_conflict():
+    agenda_items = [
+        {
+            "item_number": "4.8",
+            "section": "CONSENT CALENDAR",
+            "title": "LEASE RENEWAL",
+        },
+    ]
+
+    assert not _ledger_agenda_linkage_conflict(
+        "4.8",
+        "CONSENT CALENDAR",
+        {"4.8"},
+        agenda_items,
+    )
+
+
+def test_foreign_item_number_on_nonconsent_item_remains_conflict():
+    agenda_items = [
+        {
+            "item_number": "5.1",
+            "section": "PUBLIC HEARINGS",
+            "title": "PUBLIC HEARING",
+        },
+    ]
+
+    assert _ledger_agenda_linkage_conflict(
+        "5.1",
+        "PUBLIC HEARINGS",
+        {"4.8"},
+        agenda_items,
+        consent_remainder=False,
+    )
