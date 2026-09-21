@@ -35,6 +35,7 @@ from meeting_intelligence import (
     _local_topic_anchor_supported,
     _nonformal_source_supported,
     _quote_is_in_source,
+    _reconcile_coverage_items_with_action_ledger,
     _raw_council_commentary_supported,
     _resolve_agenda_item,
     _single_line_transcript_turn_windows,
@@ -769,6 +770,110 @@ def test_turn_window_formal_finality_keeps_current_direct_action():
         "adopted",
         candidate,
     )
+
+
+def test_coverage_reconciliation_uses_official_nonformal_agenda_identity():
+    items = [
+        {
+            "rank": 4,
+            "topic": "Complete City Fee Study Receive and File",
+            "score": 6,
+            "category": "Fees",
+            "action_status": "Received and Filed",
+            "summary": (
+                "The City Council received and filed the complete city "
+                "fee study following staff clarification."
+            ),
+            "why_it_matters": "Municipal fees affect local services.",
+            "must_include": False,
+        }
+    ]
+
+    ledger = [
+        {
+            "topic": "Complete City Fee Study Receive and File",
+            "action_status": "no council action",
+            "validated": True,
+            "agenda_linkage_conflict": False,
+            "agenda_title": (
+                "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+            ),
+        }
+    ]
+
+    assert _reconcile_coverage_items_with_action_ledger(
+        items,
+        ledger,
+    )
+
+    assert items[0]["action_status"] == "No Council Action"
+    assert items[0]["topic"] == (
+        "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+    )
+    assert "received and filed" not in items[0]["summary"].lower()
+    assert "no council action" in items[0]["summary"].lower()
+
+
+def test_coverage_reconciliation_normalizes_warrant_summary_to_passed():
+    items = [
+        {
+            "rank": 2,
+            "topic": "Warrant Register Approval & Flock Safety Camera Expenditures",
+            "score": 8,
+            "category": "Budget & Public Safety",
+            "action_status": "Approved",
+            "summary": (
+                "The City Council certified the warrant register, "
+                "which included Flock Safety camera expenditures."
+            ),
+            "why_it_matters": "Tracks municipal spending.",
+            "must_include": True,
+        }
+    ]
+
+    ledger = [
+        {
+            "topic": "Warrant Register Approval & Flock Safety Camera Expenditures",
+            "action_status": "passed",
+            "validated": True,
+            "agenda_linkage_conflict": False,
+            "agenda_title": "CERTIFICATION OF WARRANT REGISTER",
+        }
+    ]
+
+    assert _reconcile_coverage_items_with_action_ledger(
+        items,
+        ledger,
+    )
+
+    assert items[0]["action_status"] == "Passed"
+    assert "Council passed the warrant register" in items[0]["summary"]
+    # Formal compound coverage keeps its richer editorial topic label.
+    assert items[0]["topic"].startswith("Warrant Register Approval")
+
+
+def test_coverage_reconciliation_leaves_unmatched_topic_unchanged():
+    items = [
+        {
+            "rank": 1,
+            "topic": "Unmatched Topic",
+            "score": 9,
+            "category": "Other",
+            "action_status": "Discussed",
+            "summary": "The council discussed the unmatched topic.",
+            "why_it_matters": "Context.",
+            "must_include": True,
+        }
+    ]
+
+    original = dict(items[0])
+
+    assert not _reconcile_coverage_items_with_action_ledger(
+        items,
+        [],
+    )
+
+    assert items[0] == original
 
 
 def test_coverage_money_guard_repairs_spaced_cents_model_error():
