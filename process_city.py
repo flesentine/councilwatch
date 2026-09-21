@@ -3855,7 +3855,7 @@ def normalize_validated_no_council_action_language(
 
             return bool(
                 re.search(
-                    r"\\b(?:takes|took)\\s+no\\s+action\\s+on\\b"
+                    r"\b(?:takes|took)\s+no\s+action\s+on\b"
                     r"[^.!?;,]{0,180}$",
                     prefix,
                     re.I,
@@ -3877,21 +3877,21 @@ def normalize_validated_no_council_action_language(
             #   "whether to approve ..."
             #   "could approve ..."
             if re.search(
-                r"\\b(?:not|never)\\s+$",
+                r"\b(?:not|never)\s+$",
                 prefix,
                 re.I,
             ):
                 return False
 
             if re.search(
-                r"\\bwhether(?:\\s+the\\s+council)?(?:\\s+\\w+){0,3}\\s+to\\s+$",
+                r"\bwhether(?:\s+the\s+council)?(?:\s+\w+){0,3}\s+to\s+$",
                 prefix,
                 re.I,
             ):
                 return False
 
             if re.search(
-                r"\\b(?:could|would|should|may|might|can)\\s+$",
+                r"\b(?:could|would|should|may|might|can)\s+$",
                 prefix,
                 re.I,
             ):
@@ -3901,9 +3901,9 @@ def normalize_validated_no_council_action_language(
                 return True
 
             if re.search(
-                r"\\b(?:the\\s+)?(?:city\\s+)?council"
-                r"(?:\\s+(?:also|then|later|ultimately|formally|unanimously))?"
-                r"\\s+$",
+                r"\b(?:the\s+)?(?:city\s+)?council"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))?"
+                r"\s+$",
                 prefix,
                 re.I,
             ):
@@ -3919,17 +3919,17 @@ def normalize_validated_no_council_action_language(
 
             if (
                 re.search(
-                    r"\\bcouncil\\b",
+                    r"\bcouncil\b",
                     clause_prefix,
                     re.I,
                 )
                 and re.search(
-                    r"(?:,\\s*(?:and\\s+)?|\\band\\s+)$",
+                    r"(?:,\s*(?:and\s+)?|\band\s+)$",
                     clause_prefix,
                     re.I,
                 )
                 and not re.search(
-                    r"\\b(?:not|never|whether|could|would|should|may|might|can)\\b",
+                    r"\b(?:not|never|whether|could|would|should|may|might|can)\b",
                     clause_prefix,
                     re.I,
                 )
