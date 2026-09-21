@@ -273,6 +273,32 @@ Staff will review capital projects.
     )
 
 
+def test_resolve_agenda_item_from_source_block_prefers_supported_exact_number():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+12. FIRST FEE ITEM
+The comprehensive fee study covers permit deposits here.
+
+13. SECOND FEE ITEM
+The comprehensive fee study covers another permit issue here.
+"""
+
+    items = parse_agenda_structure(
+        agenda
+    )
+
+    resolved = _resolve_agenda_item_from_source_block(
+        "Comprehensive Fee Study Receive and File",
+        "12",
+        items,
+        agenda,
+    )
+
+    assert resolved is not None
+    assert resolved["item_number"] == "12"
+
+
 def test_resolve_agenda_item_from_source_block_fails_closed_when_ambiguous():
     agenda = """
 DISCUSSION/ACTION ITEMS
