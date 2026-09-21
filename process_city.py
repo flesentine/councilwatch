@@ -5355,7 +5355,7 @@ def process_city(
 
             print(
                 f"  #{item.get('rank')} "
-                f"{item.get('topic')} "
+                f"{item.get('display_topic') or item.get('topic')} "
                 f"[{item.get('score')}/10]"
                 f"{must}"
             )
