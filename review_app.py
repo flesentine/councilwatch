@@ -645,7 +645,7 @@ def story(slug: str, external_id: str):
                 f"#{esc(item.get('rank'))} · "
                 f"{esc(item.get('score'))}/10"
                 f"{must} · "
-                f"{esc(item.get('topic'))}"
+                f"{esc(item.get('display_topic') or item.get('topic'))}"
                 f"</strong>"
                 f"<br>Status: "
                 f"{esc(item.get('action_status'))}"
