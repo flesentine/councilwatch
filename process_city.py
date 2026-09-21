@@ -3536,6 +3536,499 @@ def normalize_validated_warrant_register_name(
 
 
 
+
+
+def normalize_validated_no_council_action_language(
+    story,
+    intelligence,
+):
+    """
+    Remove reader-facing action claims that repeat an editorial
+    disposition already rejected by a validated NO COUNCIL ACTION row.
+
+    This guard is intentionally narrow:
+      - the ledger row must be validated and conflict-free;
+      - it must have an official agenda title;
+      - its editorial topic must itself contain the action verb being
+        claimed in public copy;
+      - the local clause must share at least two meaningful topic cues.
+
+    That lets us correct cases such as a model-generated coverage label
+    "Complete City Fee Study Receive and File" after the source-validated
+    ledger resolves the real agenda item but records no council action,
+    without rewriting ordinary discussion or public-comment language.
+    """
+
+    action_patterns = {
+        "approve": re.compile(
+            r"\bapprove(?:s|d|ing)?\b",
+            re.I,
+        ),
+        "adopt": re.compile(
+            r"\badopt(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "authorize": re.compile(
+            r"\bauthoriz(?:e|es|ed|ing)\b",
+            re.I,
+        ),
+        "award": re.compile(
+            r"\baward(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "direct": re.compile(
+            r"\bdirect(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "reject": re.compile(
+            r"\breject(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "deny": re.compile(
+            r"\b(?:deny|denies|denied|denying)\b",
+            re.I,
+        ),
+        "appoint": re.compile(
+            r"\bappoint(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "accept": re.compile(
+            r"\baccept(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "pass": re.compile(
+            r"\bpass(?:es|ed|ing)?\b",
+            re.I,
+        ),
+        "certify": re.compile(
+            r"\b(?:certify|certifies|certified|certifying)\b",
+            re.I,
+        ),
+        "ratify": re.compile(
+            r"\b(?:ratify|ratifies|ratified|ratifying)\b",
+            re.I,
+        ),
+        "receive": re.compile(
+            r"\breceiv(?:e|es|ed|ing)\b",
+            re.I,
+        ),
+    }
+
+    generic_words = {
+        "agenda",
+        "city",
+        "complete",
+        "comprehensive",
+        "council",
+        "item",
+        "items",
+        "meeting",
+        "motion",
+        "public",
+        "report",
+        "reports",
+        "staff",
+        "action",
+        "approve",
+        "approves",
+        "approved",
+        "approving",
+        "adopt",
+        "adopts",
+        "adopted",
+        "adopting",
+        "authorize",
+        "authorizes",
+        "authorized",
+        "authorizing",
+        "award",
+        "awards",
+        "awarded",
+        "awarding",
+        "direct",
+        "directs",
+        "directed",
+        "directing",
+        "reject",
+        "rejects",
+        "rejected",
+        "rejecting",
+        "deny",
+        "denies",
+        "denied",
+        "denying",
+        "appoint",
+        "appoints",
+        "appointed",
+        "appointing",
+        "accept",
+        "accepts",
+        "accepted",
+        "accepting",
+        "pass",
+        "passes",
+        "passed",
+        "passing",
+        "certify",
+        "certifies",
+        "certified",
+        "certifying",
+        "ratify",
+        "ratifies",
+        "ratified",
+        "ratifying",
+        "receive",
+        "receives",
+        "received",
+        "receiving",
+        "file",
+        "files",
+        "filed",
+        "filing",
+    }
+
+    def topic_words(
+        value,
+    ):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(
+                    value or ""
+                ).lower(),
+            )
+            if (
+                len(word) >= 3
+                and not word.isdigit()
+                and word
+                not in generic_words
+            )
+        }
+
+    records = []
+
+    for action in intelligence.get(
+        "action_ledger",
+        [],
+    ):
+        if (
+            action.get("validated") is not True
+            or action.get(
+                "agenda_linkage_conflict"
+            )
+            or str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            != "no council action"
+        ):
+            continue
+
+        topic = str(
+            action.get(
+                "topic",
+                "",
+            )
+            or ""
+        ).strip()
+
+        agenda_title = str(
+            action.get(
+                "agenda_title",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if (
+            not topic
+            or not agenda_title
+        ):
+            continue
+
+        roots = {
+            root
+            for root, pattern
+            in action_patterns.items()
+            if pattern.search(
+                topic
+            )
+        }
+
+        if not roots:
+            continue
+
+        cues = topic_words(
+            topic
+            + " "
+            + agenda_title
+        )
+
+        if len(cues) < 2:
+            continue
+
+        records.append(
+            {
+                "roots": roots,
+                "cues": cues,
+                "subject": agenda_title,
+            }
+        )
+
+    if not records:
+        return False
+
+    action_surface = (
+        r"(?:"
+        r"approve|approves|approved|approving|"
+        r"adopt|adopts|adopted|adopting|"
+        r"authorize|authorizes|authorized|authorizing|"
+        r"award|awards|awarded|awarding|"
+        r"direct|directs|directed|directing|"
+        r"reject|rejects|rejected|rejecting|"
+        r"deny|denies|denied|denying|"
+        r"appoint|appoints|appointed|appointing|"
+        r"accept|accepts|accepted|accepting|"
+        r"pass|passes|passed|passing|"
+        r"certify|certifies|certified|certifying|"
+        r"ratify|ratifies|ratified|ratifying|"
+        r"receive|receives|received|receiving"
+        r")"
+    )
+
+    next_action_boundary = re.compile(
+        r"(?="
+        r",|;|[.!?]|"
+        r"\s+\band\b\s+"
+        r"(?="
+        r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
+        + action_surface
+        + r"\b"
+        r")"
+        r")",
+        re.I,
+    )
+
+    def scrub(
+        value,
+        *,
+        headline=False,
+    ):
+        value = str(
+            value or ""
+        )
+
+        matches = []
+
+        for root, pattern in action_patterns.items():
+            for match in pattern.finditer(
+                value
+            ):
+                matches.append(
+                    (
+                        match.start(),
+                        match.end(),
+                        root,
+                        match.group(
+                            0
+                        ),
+                    )
+                )
+
+        if not matches:
+            return value
+
+        cleaned = value
+
+        # Right-to-left replacement preserves the start offsets of
+        # earlier action claims.
+        for (
+            start,
+            end,
+            root,
+            observed,
+        ) in sorted(
+            matches,
+            key=lambda item: item[0],
+            reverse=True,
+        ):
+            if start >= len(
+                cleaned
+            ):
+                continue
+
+            tail = cleaned[
+                start:
+            ]
+
+            boundary = next_action_boundary.search(
+                tail
+            )
+
+            local_end = (
+                start
+                + boundary.start()
+                if boundary
+                else len(
+                    cleaned
+                )
+            )
+
+            local = cleaned[
+                start:local_end
+            ]
+
+            local_cues = topic_words(
+                local
+            )
+
+            candidates = []
+
+            for record in records:
+                if root not in record[
+                    "roots"
+                ]:
+                    continue
+
+                score = len(
+                    local_cues
+                    & record[
+                        "cues"
+                    ]
+                )
+
+                if score < 2:
+                    continue
+
+                candidates.append(
+                    (
+                        score,
+                        record,
+                    )
+                )
+
+            if not candidates:
+                continue
+
+            best_score = max(
+                score
+                for score, _
+                in candidates
+            )
+
+            best = [
+                record
+                for score, record
+                in candidates
+                if score
+                == best_score
+            ]
+
+            if len(best) != 1:
+                continue
+
+            subject = best[0][
+                "subject"
+            ]
+
+            if headline:
+                replacement = (
+                    "Takes No Action on "
+                    + subject
+                )
+            else:
+                present_like = (
+                    observed.lower().endswith(
+                        "s"
+                    )
+                )
+
+                replacement = (
+                    (
+                        "takes no action on "
+                        if present_like
+                        else "took no action on "
+                    )
+                    + subject
+                )
+
+                if (
+                    observed
+                    and observed[0].isupper()
+                ):
+                    replacement = (
+                        replacement[0].upper()
+                        + replacement[1:]
+                    )
+
+            cleaned = (
+                cleaned[:start]
+                + replacement
+                + cleaned[
+                    local_end:
+                ]
+            )
+
+        return cleaned
+
+    changed = False
+
+    for field in (
+        "headline",
+        "dek",
+    ):
+        old = str(
+            getattr(
+                story,
+                field,
+                "",
+            )
+            or ""
+        )
+
+        new = scrub(
+            old,
+            headline=(
+                field == "headline"
+            ),
+        )
+
+        if new != old:
+            setattr(
+                story,
+                field,
+                new,
+            )
+            changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -3557,6 +4050,12 @@ def normalize_validated_action_language(
         changed = True
 
     if normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if normalize_validated_no_council_action_language(
         story,
         intelligence,
     ):
