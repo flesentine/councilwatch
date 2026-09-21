@@ -821,6 +821,82 @@ def test_coverage_reconciliation_uses_official_nonformal_agenda_identity():
     )
 
 
+def test_coverage_reconciliation_does_not_call_off_agenda_comment_an_agenda_item():
+    items = [
+        {
+            "rank": 3,
+            "topic": "Resident Comment About Parking",
+            "score": 6,
+            "category": "Public Comment",
+            "action_status": "Discussed",
+            "summary": "A resident raised parking concerns.",
+            "why_it_matters": "Public input.",
+            "must_include": False,
+        }
+    ]
+
+    ledger = [
+        {
+            "topic": "Resident Comment About Parking",
+            "action_status": "no council action",
+            "validated": True,
+            "agenda_linkage_conflict": False,
+            "agenda_title": "",
+        }
+    ]
+
+    assert _reconcile_coverage_items_with_action_ledger(
+        items,
+        ledger,
+    )
+
+    assert items[0]["action_status"] == "No Council Action"
+    assert items[0]["summary"].startswith(
+        "Coverage topic: Resident Comment About Parking."
+    )
+    assert "Agenda item:" not in items[0]["summary"]
+
+
+def test_coverage_reconciliation_fails_closed_on_multiple_council_actions():
+    items = [
+        {
+            "rank": 1,
+            "topic": "Park Contract",
+            "score": 9,
+            "category": "Contracts",
+            "action_status": "Discussed",
+            "summary": (
+                "The council discussed the park contract, but later "
+                "the council rejected it."
+            ),
+            "why_it_matters": "Public spending.",
+            "must_include": True,
+        }
+    ]
+
+    ledger = [
+        {
+            "topic": "Park Contract",
+            "action_status": "approved",
+            "validated": True,
+            "agenda_linkage_conflict": False,
+            "agenda_title": "PARK CONTRACT",
+        }
+    ]
+
+    assert _reconcile_coverage_items_with_action_ledger(
+        items,
+        ledger,
+    )
+
+    assert items[0]["action_status"] == "Approved"
+    assert items[0]["summary"] == (
+        "Validated council disposition for PARK CONTRACT: Approved."
+    )
+    assert "discussed" not in items[0]["summary"].lower()
+    assert "rejected" not in items[0]["summary"].lower()
+
+
 def test_coverage_reconciliation_normalizes_warrant_summary_to_passed():
     items = [
         {
