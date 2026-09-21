@@ -812,6 +812,10 @@ def test_coverage_reconciliation_uses_official_nonformal_agenda_identity():
     )
     assert "received and filed" not in items[0]["summary"].lower()
     assert "no council action" in items[0]["summary"].lower()
+    assert (
+        "encroachment permit deposits for public utilities"
+        in items[0]["summary"].lower()
+    )
 
 
 def test_coverage_reconciliation_normalizes_warrant_summary_to_passed():
