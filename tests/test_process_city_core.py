@@ -561,6 +561,149 @@ def test_formal_status_normalization_handles_three_action_headline_locally():
     assert "Passes Warrant Register" not in story.headline
 
 
+
+
+def test_no_council_action_guard_rewrites_lake_forest_fee_study_claim():
+    story = make_story(
+        headline=(
+            "Lake Forest City Council Adopts CDBG Performance Report, "
+            "Passes Warrant Register, and Receives Fee Study Report"
+        ),
+        dek=(
+            "The council adopted the CDBG performance report, passed "
+            "the warrant register, and received the fee study report."
+        ),
+        body=[
+            (
+                "The council received the comprehensive fee study report "
+                "after staff presented the item."
+            )
+        ],
+        key_facts=[
+            "The council received the complete city fee study report."
+        ],
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "CDBG Annual Performance Evaluation Report",
+                "adopted",
+                agenda_title="CDBG CAPER",
+            ),
+            action(
+                "Warrant Register Approval",
+                "approved",
+                agenda_title="Certification of Warrant Register",
+            ),
+            action(
+                "Complete City Fee Study Receive and File",
+                "no council action",
+                agenda_title=(
+                    "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+                ),
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_action_language(
+        story,
+        intelligence,
+    )
+
+    assert "Approves Warrant Register" in story.headline
+    assert "Passes Warrant Register" not in story.headline
+    assert "Receives Fee Study Report" not in story.headline
+    assert (
+        "Takes No Action on ENCROACHMENT PERMIT DEPOSITS "
+        "FOR PUBLIC UTILITIES"
+        in story.headline
+    )
+
+    public_copy = "\n".join(
+        [
+            story.dek,
+            *story.body,
+            *story.key_facts,
+        ]
+    )
+
+    assert "received the fee study" not in public_copy.lower()
+    assert "received the comprehensive fee study" not in public_copy.lower()
+    assert "received the complete city fee study" not in public_copy.lower()
+    assert (
+        "took no action on ENCROACHMENT PERMIT DEPOSITS "
+        "FOR PUBLIC UTILITIES"
+        in public_copy
+    )
+
+
+def test_no_council_action_guard_leaves_unrelated_receive_language_unchanged():
+    original = (
+        "The council received a neighborhood traffic update "
+        "from public works staff."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Complete City Fee Study Receive and File",
+                "no council action",
+                agenda_title=(
+                    "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+                ),
+            ),
+        ]
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
+def test_no_council_action_guard_ignores_linkage_conflict():
+    original = "The council received the fee study report."
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Complete City Fee Study Receive and File",
+                "no council action",
+                agenda_title=(
+                    "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+                ),
+                conflict=True,
+            ),
+        ]
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
 def test_public_comment_ballot_scope_removes_unsupported_appositive():
     story = make_story(
         body=[
