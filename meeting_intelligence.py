@@ -1356,18 +1356,42 @@ def _resolve_agenda_item_from_source_block(
         the required source-block overlap;
       - otherwise requires one unique highest-scoring item.
     """
-    topic_words = (
-        _action_words(
-            topic
-        )
-        - {
-            "complete",
-            "comprehensive",
-            "receive",
-            "received",
-            "file",
-            "filed",
+    generic_words = {
+        *ACTION_STOPWORDS,
+        "complete",
+        "comprehensive",
+        "receive",
+        "received",
+        "file",
+        "filed",
+    }
+
+    def identity_words(
+        value,
+    ):
+        return {
+            _action_word_root(
+                word
+            )
+            for word in re.findall(
+                r"[a-z0-9]+",
+                _action_norm(
+                    value
+                ),
+            )
+            if (
+                len(
+                    word
+                )
+                >= 3
+                and not word.isdigit()
+                and word
+                not in generic_words
+            )
         }
+
+    topic_words = identity_words(
+        topic
     )
 
     if len(
@@ -1402,7 +1426,7 @@ def _resolve_agenda_item_from_source_block(
         if not block:
             continue
 
-        block_words = _action_words(
+        block_words = identity_words(
             block
         )
 
