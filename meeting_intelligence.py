@@ -8620,46 +8620,179 @@ def _agenda_item_source_block(
     """
     Return the raw source block for one numbered agenda item.
 
-    This is used only to keep City-obligation evidence scoped to
-    the same conduit-financing item rather than the whole meeting.
+    Boundaries are derived from item headings that the deterministic
+    agenda parser itself recognizes. This keeps source-block grammar
+    aligned with parse_agenda_structure() and prevents a block from
+    absorbing later items written as any supported form, including:
+
+      12 TITLE
+      12. TITLE
+      12) TITLE
+      5.7 TITLE
+      5.7. TITLE
+      5.7) TITLE
+      5.7
+      TITLE ON NEXT LINE
+
+    This is used only to keep evidence scoped to the same official
+    agenda item.
     """
     agenda_text = str(
         agenda or ""
     )
 
-    item_number = str(
+    target_number = str(
         item_number or ""
     ).strip()
 
-    if not item_number:
+    if not target_number:
         return ""
 
-    start_match = re.search(
-        rf"(?mi)^\s*{re.escape(item_number)}"
-        rf"(?:[.)])?(?:\s+|$)",
-        agenda_text,
+    parsed_items = parse_agenda_structure(
+        agenda_text
     )
 
-    if not start_match:
+    if not parsed_items:
         return ""
 
-    next_match = re.search(
-        r"(?mi)^\s*(?:\d+(?:\.\d+)+|\d+\.)(?:\s+|$)",
-        agenda_text[start_match.end():],
+    parsed_by_number = {
+        str(
+            item.get(
+                "item_number",
+                "",
+            )
+            or ""
+        ).strip():
+        str(
+            item.get(
+                "title",
+                "",
+            )
+            or ""
+        ).strip()
+        for item in parsed_items
+        if str(
+            item.get(
+                "item_number",
+                "",
+            )
+            or ""
+        ).strip()
+    }
+
+    if target_number not in parsed_by_number:
+        return ""
+
+    heading_pattern = re.compile(
+        r"(?mi)^\s*"
+        r"(?P<number>\d+(?:\.\d+)*)"
+        r"(?:[.)])?"
+        r"(?:\s+(?P<rest>[^\n]+))?"
+        r"\s*$"
     )
 
-    if next_match:
-        end_index = (
-            start_match.end()
-            + next_match.start()
+    starts = []
+
+    for match in heading_pattern.finditer(
+        agenda_text
+    ):
+        number = match.group(
+            "number"
         )
+
+        title = parsed_by_number.get(
+            number
+        )
+
+        if title is None:
+            continue
+
+        rest = str(
+            match.group(
+                "rest"
+            )
+            or ""
+        ).strip()
+
+        if rest:
+            rest_norm = _action_norm(
+                rest
+            )
+
+            title_norm = _action_norm(
+                title
+            )
+
+            overlap = len(
+                _action_words(
+                    rest
+                )
+                & _action_words(
+                    title
+                )
+            )
+
+            if not (
+                rest_norm == title_norm
+                or title_norm.startswith(
+                    rest_norm
+                )
+                or rest_norm.startswith(
+                    title_norm
+                )
+                or overlap >= 2
+            ):
+                continue
+
+        starts.append(
+            (
+                match.start(),
+                number,
+            )
+        )
+
+    target_indexes = [
+        index
+        for index, (
+            _,
+            number,
+        )
+        in enumerate(
+            starts
+        )
+        if number
+        == target_number
+    ]
+
+    if len(
+        target_indexes
+    ) != 1:
+        return ""
+
+    target_index = target_indexes[
+        0
+    ]
+
+    start_offset = starts[
+        target_index
+    ][0]
+
+    if (
+        target_index + 1
+        < len(
+            starts
+        )
+    ):
+        end_offset = starts[
+            target_index + 1
+        ][0]
     else:
-        end_index = len(
+        end_offset = len(
             agenda_text
         )
 
     return agenda_text[
-        start_match.start():end_index
+        start_offset:end_offset
     ]
 
 
