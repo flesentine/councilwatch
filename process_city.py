@@ -3843,6 +3843,73 @@ def normalize_validated_no_council_action_language(
 
         cleaned = value
 
+        def is_generated_no_action_context(
+            start,
+        ):
+            prefix = cleaned[
+                max(
+                    0,
+                    start - 220,
+                ):start
+            ]
+
+            return bool(
+                re.search(
+                    r"\\b(?:takes|took)\\s+no\\s+action\\s+on\\b"
+                    r"[^.!?;,]{0,180}$",
+                    prefix,
+                    re.I,
+                )
+            )
+
+        def is_affirmative_council_claim(
+            start,
+        ):
+            prefix = cleaned[
+                max(
+                    0,
+                    start - 120,
+                ):start
+            ]
+
+            # Accurate negative or hypothetical language must survive:
+            #   "did not approve ..."
+            #   "whether to approve ..."
+            #   "could approve ..."
+            if re.search(
+                r"\\b(?:not|never)\\s+$",
+                prefix,
+                re.I,
+            ):
+                return False
+
+            if re.search(
+                r"\\bwhether(?:\\s+the\\s+council)?(?:\\s+\\w+){0,3}\\s+to\\s+$",
+                prefix,
+                re.I,
+            ):
+                return False
+
+            if re.search(
+                r"\\b(?:could|would|should|may|might|can)\\s+$",
+                prefix,
+                re.I,
+            ):
+                return False
+
+            if headline:
+                return True
+
+            return bool(
+                re.search(
+                    r"\\b(?:the\\s+)?(?:city\\s+)?council"
+                    r"(?:\\s+(?:also|then|later|ultimately|formally|unanimously))?"
+                    r"\\s+$",
+                    prefix,
+                    re.I,
+                )
+            )
+
         # Right-to-left replacement preserves the start offsets of
         # earlier action claims.
         for (
@@ -3857,6 +3924,16 @@ def normalize_validated_no_council_action_language(
         ):
             if start >= len(
                 cleaned
+            ):
+                continue
+
+            if is_generated_no_action_context(
+                start
+            ):
+                continue
+
+            if not is_affirmative_council_claim(
+                start
             ):
                 continue
 
