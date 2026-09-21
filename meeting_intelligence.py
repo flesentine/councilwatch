@@ -8641,9 +8641,20 @@ def _agenda_item_source_block(
         agenda or ""
     )
 
-    target_number = str(
-        item_number or ""
-    ).strip()
+    def canonical_number(
+        value,
+    ):
+        return re.sub(
+            r"[.)]+$",
+            "",
+            str(
+                value or ""
+            ).strip(),
+        )
+
+    target_number = canonical_number(
+        item_number
+    )
 
     if not target_number:
         return ""
@@ -8656,13 +8667,12 @@ def _agenda_item_source_block(
         return ""
 
     parsed_by_number = {
-        str(
+        canonical_number(
             item.get(
                 "item_number",
                 "",
             )
-            or ""
-        ).strip():
+        ):
         str(
             item.get(
                 "title",
@@ -8671,13 +8681,12 @@ def _agenda_item_source_block(
             or ""
         ).strip()
         for item in parsed_items
-        if str(
+        if canonical_number(
             item.get(
                 "item_number",
                 "",
             )
-            or ""
-        ).strip()
+        )
     }
 
     if target_number not in parsed_by_number:
