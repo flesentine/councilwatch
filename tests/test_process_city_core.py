@@ -674,7 +674,7 @@ def test_no_council_action_guard_is_idempotent_when_official_title_has_action_ve
     assert story.body == [
         (
             "The council took no action on "
-            "APPROVE MAIN STREET PAVING CONTRACT"
+            "APPROVE MAIN STREET PAVING CONTRACT."
         )
     ]
 
