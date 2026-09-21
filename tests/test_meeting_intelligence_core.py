@@ -808,6 +808,9 @@ def test_coverage_reconciliation_uses_official_nonformal_agenda_identity():
 
     assert items[0]["action_status"] == "No Council Action"
     assert items[0]["topic"] == (
+        "Complete City Fee Study Receive and File"
+    )
+    assert items[0]["display_topic"] == (
         "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
     )
     assert "received and filed" not in items[0]["summary"].lower()
