@@ -1332,6 +1332,161 @@ def _resolve_agenda_item(
 
 
 
+def _resolve_agenda_item_from_source_block(
+    topic,
+    proposed_item_number,
+    agenda_items,
+    agenda,
+):
+    """
+    Conservative fallback for an editorial coverage label whose
+    wording differs from the official agenda title but appears in
+    that item's official supporting block.
+
+    Example:
+      coverage: "Comprehensive Fee Study Receive and File"
+      agenda:   "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+      item block: "Fee Study Follow-Up: Encroachment ..."
+
+    This fallback is intentionally narrower than title matching:
+      - requires at least two meaningful topic words in one official
+        item block;
+      - ignores generic editorial disposition words;
+      - prefers an exact proposed item number only when it also has
+        the required source-block overlap;
+      - otherwise requires one unique highest-scoring item.
+    """
+    generic_words = {
+        *ACTION_STOPWORDS,
+        "complete",
+        "comprehensive",
+        "receive",
+        "received",
+        "file",
+        "filed",
+    }
+
+    def identity_words(
+        value,
+    ):
+        return {
+            _action_word_root(
+                word
+            )
+            for word in re.findall(
+                r"[a-z0-9]+",
+                _action_norm(
+                    value
+                ),
+            )
+            if (
+                len(
+                    word
+                )
+                >= 3
+                and not word.isdigit()
+                and word
+                not in generic_words
+            )
+        }
+
+    topic_words = identity_words(
+        topic
+    )
+
+    if len(
+        topic_words
+    ) < 2:
+        return None
+
+    candidates = []
+
+    proposed = str(
+        proposed_item_number
+        or ""
+    ).strip()
+
+    for item in agenda_items:
+        item_number = str(
+            item.get(
+                "item_number",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not item_number:
+            continue
+
+        block = _agenda_item_source_block(
+            agenda,
+            item_number,
+        )
+
+        if not block:
+            continue
+
+        block_words = identity_words(
+            block
+        )
+
+        overlap = (
+            topic_words
+            & block_words
+        )
+
+        score = len(
+            overlap
+        )
+
+        if score < 2:
+            continue
+
+        candidates.append(
+            (
+                score,
+                item_number == proposed,
+                item,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    exact = [
+        entry
+        for entry in candidates
+        if entry[1]
+    ]
+
+    if len(
+        exact
+    ) == 1:
+        return exact[0][2]
+
+    candidates.sort(
+        key=lambda entry: entry[0],
+        reverse=True,
+    )
+
+    best_score = candidates[0][0]
+
+    best = [
+        entry
+        for entry in candidates
+        if entry[0]
+        == best_score
+    ]
+
+    if len(
+        best
+    ) != 1:
+        return None
+
+    return best[0][2]
+
+
+
 def _action_norm(value):
     return re.sub(
         r"\s+",
@@ -5628,6 +5783,31 @@ receive an action-ledger disposition grounded in the source evidence.
             raw_status
         )
 
+        if (
+            not agenda_item
+            and status
+            not in ACTION_FORMAL_STATUSES
+        ):
+            agenda_item = (
+                _resolve_agenda_item_from_source_block(
+                    topic,
+                    proposed_item_number,
+                    agenda_items,
+                    agenda,
+                )
+            )
+
+            if agenda_item:
+                item_number = agenda_item[
+                    "item_number"
+                ]
+                agenda_section = agenda_item[
+                    "section"
+                ]
+                agenda_title = agenda_item[
+                    "title"
+                ]
+
         status_was_normalized = bool(
             raw_status
             and raw_status != status
@@ -8440,45 +8620,188 @@ def _agenda_item_source_block(
     """
     Return the raw source block for one numbered agenda item.
 
-    This is used only to keep City-obligation evidence scoped to
-    the same conduit-financing item rather than the whole meeting.
+    Boundaries are derived from item headings that the deterministic
+    agenda parser itself recognizes. This keeps source-block grammar
+    aligned with parse_agenda_structure() and prevents a block from
+    absorbing later items written as any supported form, including:
+
+      12 TITLE
+      12. TITLE
+      12) TITLE
+      5.7 TITLE
+      5.7. TITLE
+      5.7) TITLE
+      5.7
+      TITLE ON NEXT LINE
+
+    This is used only to keep evidence scoped to the same official
+    agenda item.
     """
     agenda_text = str(
         agenda or ""
     )
 
-    item_number = str(
-        item_number or ""
-    ).strip()
-
-    if not item_number:
-        return ""
-
-    start_match = re.search(
-        rf"(?mi)^\s*{re.escape(item_number)}(?:\s+|$)",
-        agenda_text,
-    )
-
-    if not start_match:
-        return ""
-
-    next_match = re.search(
-        r"(?mi)^\s*(?:\d+(?:\.\d+)+|\d+\.)(?:\s+|$)",
-        agenda_text[start_match.end():],
-    )
-
-    if next_match:
-        end_index = (
-            start_match.end()
-            + next_match.start()
+    def canonical_number(
+        value,
+    ):
+        return re.sub(
+            r"[.)]+$",
+            "",
+            str(
+                value or ""
+            ).strip(),
         )
+
+    target_number = canonical_number(
+        item_number
+    )
+
+    if not target_number:
+        return ""
+
+    parsed_items = parse_agenda_structure(
+        agenda_text
+    )
+
+    if not parsed_items:
+        return ""
+
+    parsed_by_number = {
+        canonical_number(
+            item.get(
+                "item_number",
+                "",
+            )
+        ):
+        str(
+            item.get(
+                "title",
+                "",
+            )
+            or ""
+        ).strip()
+        for item in parsed_items
+        if canonical_number(
+            item.get(
+                "item_number",
+                "",
+            )
+        )
+    }
+
+    if target_number not in parsed_by_number:
+        return ""
+
+    heading_pattern = re.compile(
+        r"(?mi)^\s*"
+        r"(?P<number>\d+(?:\.\d+)*)"
+        r"(?:[.)])?"
+        r"(?:\s+(?P<rest>[^\n]+))?"
+        r"\s*$"
+    )
+
+    starts = []
+
+    for match in heading_pattern.finditer(
+        agenda_text
+    ):
+        number = match.group(
+            "number"
+        )
+
+        title = parsed_by_number.get(
+            number
+        )
+
+        if title is None:
+            continue
+
+        rest = str(
+            match.group(
+                "rest"
+            )
+            or ""
+        ).strip()
+
+        if rest:
+            rest_norm = _action_norm(
+                rest
+            )
+
+            title_norm = _action_norm(
+                title
+            )
+
+            overlap = len(
+                _action_words(
+                    rest
+                )
+                & _action_words(
+                    title
+                )
+            )
+
+            if not (
+                rest_norm == title_norm
+                or title_norm.startswith(
+                    rest_norm
+                )
+                or rest_norm.startswith(
+                    title_norm
+                )
+                or overlap >= 2
+            ):
+                continue
+
+        starts.append(
+            (
+                match.start(),
+                number,
+            )
+        )
+
+    target_indexes = [
+        index
+        for index, (
+            _,
+            number,
+        )
+        in enumerate(
+            starts
+        )
+        if number
+        == target_number
+    ]
+
+    if len(
+        target_indexes
+    ) != 1:
+        return ""
+
+    target_index = target_indexes[
+        0
+    ]
+
+    start_offset = starts[
+        target_index
+    ][0]
+
+    if (
+        target_index + 1
+        < len(
+            starts
+        )
+    ):
+        end_offset = starts[
+            target_index + 1
+        ][0]
     else:
-        end_index = len(
+        end_offset = len(
             agenda_text
         )
 
     return agenda_text[
-        start_match.start():end_index
+        start_offset:end_offset
     ]
 
 

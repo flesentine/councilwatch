@@ -4,6 +4,7 @@ from meeting_intelligence import (
     CoverageItem,
     CoveragePlan,
     _action_evidence_quote_is_bounded,
+    _agenda_item_source_block,
     _action_topic_component_labels,
     _action_topic_components,
     _action_word_root,
@@ -38,6 +39,7 @@ from meeting_intelligence import (
     _reconcile_coverage_items_with_action_ledger,
     _raw_council_commentary_supported,
     _resolve_agenda_item,
+    _resolve_agenda_item_from_source_block,
     _single_line_transcript_turn_windows,
     _topic_scope_supported,
     _turn_window_agenda_identity_supported,
@@ -215,6 +217,156 @@ def test_resolve_agenda_item_prefers_supported_official_mapping():
         "Completely unrelated topic",
         "99",
         agenda_items,
+    ) is None
+
+
+def test_agenda_item_source_block_accepts_number_dot_title():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+12. ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES
+Fee Study Follow-Up: Encroachment Permit Deposits for Public Utilities
+City Council Discretion
+
+13. OTHER ITEM
+Background text.
+"""
+
+    block = _agenda_item_source_block(
+        agenda,
+        "12",
+    )
+
+    assert "ENCROACHMENT PERMIT DEPOSITS" in block
+    assert "Fee Study Follow-Up" in block
+    assert "OTHER ITEM" not in block
+
+
+def test_agenda_item_source_block_stops_at_all_supported_heading_forms():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+11 FIRST ITEM
+First item body.
+
+12) SECOND ITEM
+Second item body.
+
+5.7. THIRD ITEM
+Third item body.
+
+5.8
+FOURTH ITEM
+Fourth item body.
+"""
+
+    first = _agenda_item_source_block(
+        agenda,
+        "11",
+    )
+    second = _agenda_item_source_block(
+        agenda,
+        "12",
+    )
+    third = _agenda_item_source_block(
+        agenda,
+        "5.7",
+    )
+    fourth = _agenda_item_source_block(
+        agenda,
+        "5.8",
+    )
+
+    assert "First item body" in first
+    assert "SECOND ITEM" not in first
+
+    assert "Second item body" in second
+    assert "THIRD ITEM" not in second
+
+    assert "Third item body" in third
+    assert "FOURTH ITEM" not in third
+
+    assert "FOURTH ITEM" in fourth
+    assert "Fourth item body" in fourth
+
+
+def test_resolve_agenda_item_from_source_block_links_fee_study_alias():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+12. ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES
+Fee Study Follow-Up: Encroachment Permit Deposits for Public Utilities
+The comprehensive fee study included public works fee deposits.
+City Council Discretion
+
+13. CAPITAL IMPROVEMENT PLAN UPDATE
+Staff will review capital projects.
+"""
+
+    items = parse_agenda_structure(
+        agenda
+    )
+
+    resolved = _resolve_agenda_item_from_source_block(
+        "Comprehensive Fee Study Receive and File",
+        "",
+        items,
+        agenda,
+    )
+
+    assert resolved is not None
+    assert resolved["item_number"] == "12"
+    assert resolved["title"] == (
+        "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+    )
+
+
+def test_resolve_agenda_item_from_source_block_prefers_supported_exact_number():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+12. FIRST FEE ITEM
+The comprehensive fee study covers permit deposits here.
+
+13. SECOND FEE ITEM
+The comprehensive fee study covers another permit issue here.
+"""
+
+    items = parse_agenda_structure(
+        agenda
+    )
+
+    resolved = _resolve_agenda_item_from_source_block(
+        "Comprehensive Fee Study Receive and File",
+        "12",
+        items,
+        agenda,
+    )
+
+    assert resolved is not None
+    assert resolved["item_number"] == "12"
+
+
+def test_resolve_agenda_item_from_source_block_fails_closed_when_ambiguous():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+12. FIRST FEE ITEM
+The comprehensive fee study covers this item.
+
+13. SECOND FEE ITEM
+The comprehensive fee study covers this item too.
+"""
+
+    items = parse_agenda_structure(
+        agenda
+    )
+
+    assert _resolve_agenda_item_from_source_block(
+        "Comprehensive Fee Study Receive and File",
+        "",
+        items,
+        agenda,
     ) is None
 
 
