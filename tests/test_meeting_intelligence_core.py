@@ -242,6 +242,54 @@ Background text.
     assert "OTHER ITEM" not in block
 
 
+def test_agenda_item_source_block_stops_at_all_supported_heading_forms():
+    agenda = """
+DISCUSSION/ACTION ITEMS
+
+11 FIRST ITEM
+First item body.
+
+12) SECOND ITEM
+Second item body.
+
+5.7. THIRD ITEM
+Third item body.
+
+5.8
+FOURTH ITEM
+Fourth item body.
+"""
+
+    first = _agenda_item_source_block(
+        agenda,
+        "11",
+    )
+    second = _agenda_item_source_block(
+        agenda,
+        "12",
+    )
+    third = _agenda_item_source_block(
+        agenda,
+        "5.7",
+    )
+    fourth = _agenda_item_source_block(
+        agenda,
+        "5.8",
+    )
+
+    assert "First item body" in first
+    assert "SECOND ITEM" not in first
+
+    assert "Second item body" in second
+    assert "THIRD ITEM" not in second
+
+    assert "Third item body" in third
+    assert "FOURTH ITEM" not in third
+
+    assert "FOURTH ITEM" in fourth
+    assert "Fourth item body" in fourth
+
+
 def test_resolve_agenda_item_from_source_block_links_fee_study_alias():
     agenda = """
 DISCUSSION/ACTION ITEMS
