@@ -205,7 +205,8 @@ def test_story_and_edit_rendering(env):
             "rank": 1,
             "score": 9,
             "must_include": True,
-            "topic": "Park Contract",
+            "topic": "Internal Coverage Topic",
+            "display_topic": "OFFICIAL PARK CONTRACT",
             "action_status": "approved",
             "summary": "Council action",
             "why_it_matters": "Local spending",
@@ -226,6 +227,8 @@ def test_story_and_edit_rendering(env):
     assert "Official roster &lt;matched&gt;" in page
     assert "person?a=1&amp;b=2" in page
     assert "MUST INCLUDE" in page
+    assert "OFFICIAL PARK CONTRACT" in page
+    assert "Internal Coverage Topic" not in page
     assert "MINOR · dek" in page
     assert "legacy issue" in page
     assert "Publish locally" in page
