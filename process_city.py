@@ -3801,9 +3801,16 @@ def normalize_validated_no_council_action_language(
 
     next_action_boundary = re.compile(
         r"(?="
-        r",|;|[.!?]|"
+        r";|[.!?]|"
         r"\s+\band\b\s+"
         r"(?="
+        r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
+        + action_surface
+        + r"\b"
+        r")|"
+        r",\s*"
+        r"(?="
+        r"(?:and\s+|but\s+)?"
         r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
         + action_surface
         + r"\b"
@@ -3862,14 +3869,16 @@ def normalize_validated_no_council_action_language(
                 )
             )
 
-        def is_affirmative_council_claim(
+        def affirmative_replacement_start(
             start,
         ):
+            prefix_start = max(
+                0,
+                start - 160,
+            )
+
             prefix = cleaned[
-                max(
-                    0,
-                    start - 120,
-                ):start
+                prefix_start:start
             ]
 
             # Accurate negative or hypothetical language must survive:
@@ -3881,24 +3890,21 @@ def normalize_validated_no_council_action_language(
                 prefix,
                 re.I,
             ):
-                return False
+                return None
 
             if re.search(
                 r"\bwhether(?:\s+the\s+council)?(?:\s+\w+){0,3}\s+to\s+$",
                 prefix,
                 re.I,
             ):
-                return False
+                return None
 
             if re.search(
                 r"\b(?:could|would|should|may|might|can)\s+$",
                 prefix,
                 re.I,
             ):
-                return False
-
-            if headline:
-                return True
+                return None
 
             if re.search(
                 r"\b(?:the\s+)?(?:city\s+)?council"
@@ -3907,7 +3913,30 @@ def normalize_validated_no_council_action_language(
                 prefix,
                 re.I,
             ):
-                return True
+                return start
+
+            # Headlines can use a finite auxiliary or a "votes to"
+            # construction. Replace the whole predicate rather than
+            # leaving a dangling "Has" or "Votes to" before the
+            # generated no-action phrase.
+            if headline:
+                auxiliary = re.search(
+                    r"\b(?:the\s+)?(?:city\s+)?council\s+"
+                    r"(?P<predicate>"
+                    r"(?:has|had|will)\s+|"
+                    r"votes?\s+to\s+"
+                    r")$",
+                    prefix,
+                    re.I,
+                )
+
+                if auxiliary:
+                    return (
+                        prefix_start
+                        + auxiliary.start(
+                            "predicate"
+                        )
+                    )
 
             # Coordinated verbs can inherit the same explicit Council
             # subject:
@@ -3934,9 +3963,9 @@ def normalize_validated_no_council_action_language(
                     re.I,
                 )
             ):
-                return True
+                return start
 
-            return False
+            return None
 
         # Right-to-left replacement preserves the start offsets of
         # earlier action claims.
@@ -3960,9 +3989,13 @@ def normalize_validated_no_council_action_language(
             ):
                 continue
 
-            if not is_affirmative_council_claim(
-                start
-            ):
+            replacement_start = (
+                affirmative_replacement_start(
+                    start
+                )
+            )
+
+            if replacement_start is None:
                 continue
 
             tail = cleaned[
@@ -4070,7 +4103,7 @@ def normalize_validated_no_council_action_language(
                     )
 
             cleaned = (
-                cleaned[:start]
+                cleaned[:replacement_start]
                 + replacement
                 + cleaned[
                     local_end:
