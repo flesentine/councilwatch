@@ -9321,8 +9321,14 @@ def _reconcile_coverage_items_with_action_ledger(
                 or "the topic"
             )
 
-            cleaned = (
+            label = (
                 "Agenda item: "
+                if agenda_title
+                else "Coverage topic: "
+            )
+
+            cleaned = (
+                label
                 + subject
                 + ". The validated action ledger records "
                 "no council action."
@@ -9344,13 +9350,50 @@ def _reconcile_coverage_items_with_action_ledger(
                 re.I,
             )
 
-            cleaned = council_action.sub(
-                lambda match:
-                    match.group(1)
-                    + replacement,
-                summary,
-                count=1,
+            action_matches = list(
+                council_action.finditer(
+                    summary
+                )
             )
+
+            if len(
+                action_matches
+            ) > 1:
+                subject = (
+                    agenda_title
+                    or str(
+                        item.get(
+                            "display_topic",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+                    or str(
+                        item.get(
+                            "topic",
+                            "",
+                        )
+                        or ""
+                    ).strip()
+                    or "this coverage topic"
+                )
+
+                cleaned = (
+                    "Validated council disposition for "
+                    + subject
+                    + ": "
+                    + display
+                    + "."
+                )
+
+            else:
+                cleaned = council_action.sub(
+                    lambda match:
+                        match.group(1)
+                        + replacement,
+                    summary,
+                    count=1,
+                )
 
         else:
             cleaned = summary
