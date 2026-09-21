@@ -9280,10 +9280,14 @@ def _reconcile_coverage_items_with_action_ledger(
             agenda_title
             and status
             not in ACTION_FORMAL_STATUSES
-            and item.get("topic")
+            and item.get(
+                "display_topic"
+            )
             != agenda_title
         ):
-            item["topic"] = agenda_title
+            item[
+                "display_topic"
+            ] = agenda_title
             changed = True
 
         summary = str(
@@ -9300,6 +9304,13 @@ def _reconcile_coverage_items_with_action_ledger(
         if status == "no council action":
             subject = (
                 agenda_title
+                or str(
+                    item.get(
+                        "display_topic",
+                        "",
+                    )
+                    or ""
+                ).strip()
                 or str(
                     item.get(
                         "topic",
@@ -9905,11 +9916,20 @@ def writer_context(
             else "OPTIONAL"
         )
 
+        display_topic = (
+            item.get(
+                "display_topic"
+            )
+            or item.get(
+                "topic"
+            )
+        )
+
         lines.append(
             f"{item.get('rank')}. "
             f"[{item.get('score')}/10] "
             f"[{flag}] "
-            f"{item.get('topic')}"
+            f"{display_topic}"
         )
 
     return "\n".join(lines)
