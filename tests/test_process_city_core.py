@@ -679,6 +679,79 @@ def test_no_council_action_guard_is_idempotent_when_official_title_has_action_ve
     ]
 
 
+
+def test_no_council_action_guard_rewrites_headline_auxiliary_as_whole_predicate():
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    story = make_story(
+        headline=(
+            "Council Has Approved Main Street Paving Contract"
+        )
+    )
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == (
+        "Council Takes No Action on MAIN STREET PAVING CONTRACT"
+    )
+
+    story = make_story(
+        headline=(
+            "Council Votes to Approve Main Street Paving Contract"
+        )
+    )
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == (
+        "Council Takes No Action on MAIN STREET PAVING CONTRACT"
+    )
+
+
+def test_no_council_action_guard_keeps_comma_inside_item_subject():
+    story = make_story(
+        headline=(
+            "Council Approves Main Street Paving, Drainage Contract"
+        )
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Drainage Contract Approve",
+                "no council action",
+                agenda_title=(
+                    "MAIN STREET PAVING AND DRAINAGE CONTRACT"
+                ),
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.headline == (
+        "Council Takes No Action on "
+        "MAIN STREET PAVING AND DRAINAGE CONTRACT"
+    )
+
+
 def test_no_council_action_guard_preserves_negated_action_claim():
     original = (
         "The council did not approve the Main Street paving contract."
