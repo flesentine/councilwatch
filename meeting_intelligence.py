@@ -9099,6 +9099,259 @@ that a useful local story should not omit.
     return plan.model_dump()
 
 
+def _reconcile_coverage_items_with_action_ledger(
+    coverage_items,
+    action_ledger,
+):
+    """
+    Keep review-facing coverage metadata subordinate to the
+    source-validated action ledger.
+
+    The coverage planner is allowed to rank and summarize topics,
+    but it must not:
+      - invent a replacement name for an agenda-linked nonformal item;
+      - retain an action verb that conflicts with the validated ledger.
+
+    Exact topic matches are used deliberately. This avoids collapsing
+    compound editorial topics into a narrower agenda title.
+    """
+    status_display = {
+        "approved": "Approved",
+        "adopted": "Adopted",
+        "authorized": "Authorized",
+        "awarded": "Awarded",
+        "directed": "Directed",
+        "rejected": "Rejected",
+        "denied": "Denied",
+        "appointed": "Appointed",
+        "accepted": "Accepted",
+        "passed": "Passed",
+        "discussed": "Discussed",
+        "considered": "Considered",
+        "requested staff follow-up": "Requested Staff Follow-up",
+        "resident comment": "Resident Comment",
+        "public comment": "Public Comment",
+        "speaker comment": "Speaker Comment",
+        "no council action": "No Council Action",
+        "unclear": "Unclear",
+    }
+
+    verb_for_status = {
+        "approved": "approved",
+        "adopted": "adopted",
+        "authorized": "authorized",
+        "awarded": "awarded",
+        "directed": "directed",
+        "rejected": "rejected",
+        "denied": "denied",
+        "appointed": "appointed",
+        "accepted": "accepted",
+        "passed": "passed",
+        "discussed": "discussed",
+        "considered": "considered",
+    }
+
+    action_phrase = re.compile(
+        r"\b("
+        r"approved|adopted|authorized|awarded|directed|"
+        r"rejected|denied|appointed|accepted|passed|"
+        r"certified|considered|discussed|"
+        r"received\s+and\s+filed"
+        r")\b",
+        re.I,
+    )
+
+    validated_by_topic = {}
+
+    for action in action_ledger:
+        if action.get("validated") is not True:
+            continue
+
+        topic_key = _action_norm(
+            action.get(
+                "topic",
+                "",
+            )
+        )
+
+        if not topic_key:
+            continue
+
+        validated_by_topic.setdefault(
+            topic_key,
+            [],
+        ).append(
+            action
+        )
+
+    changed = False
+
+    for item in coverage_items:
+        topic_key = _action_norm(
+            item.get(
+                "topic",
+                "",
+            )
+        )
+
+        matches = validated_by_topic.get(
+            topic_key,
+            [],
+        )
+
+        if not matches:
+            continue
+
+        statuses = {
+            _action_norm(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            )
+            for action in matches
+            if _action_norm(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            )
+        }
+
+        if len(statuses) != 1:
+            continue
+
+        status = next(
+            iter(
+                statuses
+            )
+        )
+
+        display = status_display.get(
+            status,
+            status.title(),
+        )
+
+        if item.get("action_status") != display:
+            item["action_status"] = display
+            changed = True
+
+        agenda_titles = {
+            str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+                or ""
+            ).strip()
+            for action in matches
+            if (
+                not action.get(
+                    "agenda_linkage_conflict"
+                )
+                and str(
+                    action.get(
+                        "agenda_title",
+                        "",
+                    )
+                    or ""
+                ).strip()
+            )
+        }
+
+        agenda_title = (
+            next(
+                iter(
+                    agenda_titles
+                )
+            )
+            if len(
+                agenda_titles
+            )
+            == 1
+            else ""
+        )
+
+        # For a nonformal agenda-linked topic, the official agenda
+        # title is the safest review-facing identity. Coverage-model
+        # labels such as "Complete City Fee Study Receive and File"
+        # must not replace the actual agenda item name.
+        if (
+            agenda_title
+            and status
+            not in ACTION_FORMAL_STATUSES
+            and item.get("topic")
+            != agenda_title
+        ):
+            item["topic"] = agenda_title
+            changed = True
+
+        summary = str(
+            item.get(
+                "summary",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not summary:
+            continue
+
+        if status == "no council action":
+            subject = (
+                agenda_title
+                or str(
+                    item.get(
+                        "topic",
+                        "",
+                    )
+                    or ""
+                ).strip()
+                or "the topic"
+            )
+
+            cleaned = (
+                "Agenda item: "
+                + subject
+                + ". The validated action ledger records "
+                "no council action."
+            )
+
+        elif status in verb_for_status:
+            replacement = verb_for_status[
+                status
+            ]
+
+            # Normalize only the first Council-attributed action
+            # phrase in the editorial summary. The ledger status
+            # controls the disposition; later descriptive clauses
+            # remain untouched.
+            council_action = re.compile(
+                r"(\b(?:the\s+)?(?:city\s+)?council\b"
+                r"[^.!?]{0,80}?)"
+                + action_phrase.pattern,
+                re.I,
+            )
+
+            cleaned = council_action.sub(
+                lambda match:
+                    match.group(1)
+                    + replacement,
+                summary,
+                count=1,
+            )
+
+        else:
+            cleaned = summary
+
+        if cleaned != summary:
+            item["summary"] = cleaned
+            changed = True
+
+    return changed
+
+
+
 def build_meeting_intelligence(
     meeting,
     notes,
@@ -9208,101 +9461,16 @@ def build_meeting_intelligence(
         )
         raise
 
-    # The coverage planner ranks newsworthiness; the validated action
-    # ledger controls what actually happened. For exact topic matches,
-    # keep the review-facing coverage status synchronized with the
-    # single validated ledger disposition.
-    validated_statuses_by_topic = {}
-
-    for action in action_ledger:
-        if action.get(
-            "validated"
-        ) is not True:
-            continue
-
-        topic_key = _action_norm(
-            action.get(
-                "topic",
-                "",
-            )
-        )
-
-        status = _action_norm(
-            action.get(
-                "action_status",
-                "",
-            )
-        )
-
-        if (
-            not topic_key
-            or not status
-        ):
-            continue
-
-        validated_statuses_by_topic.setdefault(
-            topic_key,
-            set(),
-        ).add(
-            status
-        )
-
-    status_display = {
-        "approved": "Approved",
-        "adopted": "Adopted",
-        "authorized": "Authorized",
-        "awarded": "Awarded",
-        "directed": "Directed",
-        "rejected": "Rejected",
-        "denied": "Denied",
-        "appointed": "Appointed",
-        "accepted": "Accepted",
-        "passed": "Passed",
-        "discussed": "Discussed",
-        "considered": "Considered",
-        "requested staff follow-up": "Requested Staff Follow-up",
-        "resident comment": "Resident Comment",
-        "public comment": "Public Comment",
-        "speaker comment": "Speaker Comment",
-        "no council action": "No Council Action",
-        "unclear": "Unclear",
-    }
-
-    for item in coverage.get(
-        "items",
-        [],
-    ):
-        topic_key = _action_norm(
-            item.get(
-                "topic",
-                "",
-            )
-        )
-
-        statuses = (
-            validated_statuses_by_topic.get(
-                topic_key,
-                set(),
-            )
-        )
-
-        if len(
-            statuses
-        ) != 1:
-            continue
-
-        status = next(
-            iter(
-                statuses
-            )
-        )
-
-        item[
-            "action_status"
-        ] = status_display.get(
-            status,
-            status.title(),
-        )
+    # Review-facing coverage metadata is editorial, not evidence.
+    # Reconcile it after action extraction so official agenda identity
+    # and validated disposition always win on exact topic matches.
+    _reconcile_coverage_items_with_action_ledger(
+        coverage.get(
+            "items",
+            [],
+        ),
+        action_ledger,
+    )
 
     editorial = str(
         coverage.get(
@@ -9643,6 +9811,25 @@ def writer_context(
                 f"  Status: {status}"
             )
 
+            agenda_title = str(
+                action.get(
+                    "agenda_title",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if (
+                agenda_title
+                and not action.get(
+                    "agenda_linkage_conflict"
+                )
+            ):
+                lines.append(
+                    "  Official agenda identity: "
+                    + agenda_title
+                )
+
             lines.append(
                 "  Evidence validated: "
                 + (
@@ -9694,6 +9881,11 @@ def writer_context(
     lines.append(
         "- The coverage plan below ranks newsworthiness only. "
         "Its action-status guesses are NOT factual evidence."
+    )
+    lines.append(
+        "- For an agenda-linked action with an Official agenda "
+        "identity above, use that official title as the canonical "
+        "topic name rather than an invented coverage-plan label."
     )
 
     lines.append("")
