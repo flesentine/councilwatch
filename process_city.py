@@ -3900,15 +3900,43 @@ def normalize_validated_no_council_action_language(
             if headline:
                 return True
 
-            return bool(
+            if re.search(
+                r"\\b(?:the\\s+)?(?:city\\s+)?council"
+                r"(?:\\s+(?:also|then|later|ultimately|formally|unanimously))?"
+                r"\\s+$",
+                prefix,
+                re.I,
+            ):
+                return True
+
+            # Coordinated verbs can inherit the same explicit Council
+            # subject:
+            #   "The council adopted X, passed Y, and received Z."
+            clause_prefix = re.split(
+                r"[.!?;]",
+                prefix,
+            )[-1]
+
+            if (
                 re.search(
-                    r"\\b(?:the\\s+)?(?:city\\s+)?council"
-                    r"(?:\\s+(?:also|then|later|ultimately|formally|unanimously))?"
-                    r"\\s+$",
-                    prefix,
+                    r"\\bcouncil\\b",
+                    clause_prefix,
                     re.I,
                 )
-            )
+                and re.search(
+                    r"(?:,\\s*(?:and\\s+)?|\\band\\s+)$",
+                    clause_prefix,
+                    re.I,
+                )
+                and not re.search(
+                    r"\\b(?:not|never|whether|could|would|should|may|might|can)\\b",
+                    clause_prefix,
+                    re.I,
+                )
+            ):
+                return True
+
+            return False
 
         # Right-to-left replacement preserves the start offsets of
         # earlier action claims.
