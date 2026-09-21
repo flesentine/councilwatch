@@ -3853,21 +3853,44 @@ def normalize_validated_no_council_action_language(
         def is_generated_no_action_context(
             start,
         ):
-            prefix = cleaned[
-                max(
-                    0,
-                    start - 220,
-                ):start
-            ]
+            for record in records:
+                subject = str(
+                    record.get(
+                        "subject",
+                        "",
+                    )
+                    or ""
+                ).strip()
 
-            return bool(
-                re.search(
-                    r"\b(?:takes|took)\s+no\s+action\s+on\b"
-                    r"[^.!?;,]{0,180}$",
-                    prefix,
+                if not subject:
+                    continue
+
+                generated_pattern = re.compile(
+                    r"\b(?:takes|took)\s+no\s+action\s+on\s+"
+                    + re.escape(
+                        subject
+                    ),
                     re.I,
                 )
-            )
+
+                for generated in generated_pattern.finditer(
+                    cleaned
+                ):
+                    subject_start = (
+                        generated.end()
+                        - len(
+                            subject
+                        )
+                    )
+
+                    if (
+                        subject_start
+                        <= start
+                        < generated.end()
+                    ):
+                        return True
+
+            return False
 
         def affirmative_replacement_start(
             start,
@@ -3880,6 +3903,26 @@ def normalize_validated_no_council_action_language(
             prefix = cleaned[
                 prefix_start:start
             ]
+
+            clause_prefix = re.split(
+                r"[.!?]",
+                prefix,
+            )[-1]
+
+            # Preserve historical context about prior council actions.
+            if (
+                re.search(
+                    r"\b(?:in|during|since|from)\s+(?:19|20)\d{2}\b",
+                    clause_prefix,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:previously|earlier|last\s+year|years?\s+ago|prior\s+meeting)\b",
+                    clause_prefix,
+                    re.I,
+                )
+            ):
+                return None
 
             # Accurate negative or hypothetical language must survive:
             #   "did not approve ..."
@@ -3915,25 +3958,43 @@ def normalize_validated_no_council_action_language(
             ):
                 return start
 
-            # Headlines can use a finite auxiliary or a "votes to"
-            # construction. Replace the whole predicate rather than
-            # leaving a dangling "Has" or "Votes to" before the
-            # generated no-action phrase.
+            # Reader-facing copy can use a finite auxiliary.
+            # Replace the whole predicate rather than leaving a
+            # dangling "has" / "had" before the generated phrase.
+            auxiliary = re.search(
+                r"\b(?:the\s+)?(?:city\s+)?council\s+"
+                r"(?P<predicate>"
+                r"(?:has|had)\s+"
+                r")$",
+                prefix,
+                re.I,
+            )
+
+            if auxiliary:
+                return (
+                    prefix_start
+                    + auxiliary.start(
+                        "predicate"
+                    )
+                )
+
+            # Headlines also commonly use "votes to" or future-style
+            # auxiliary wording.
             if headline:
-                auxiliary = re.search(
+                headline_auxiliary = re.search(
                     r"\b(?:the\s+)?(?:city\s+)?council\s+"
                     r"(?P<predicate>"
-                    r"(?:has|had|will)\s+|"
+                    r"will\s+|"
                     r"votes?\s+to\s+"
                     r")$",
                     prefix,
                     re.I,
                 )
 
-                if auxiliary:
+                if headline_auxiliary:
                     return (
                         prefix_start
-                        + auxiliary.start(
+                        + headline_auxiliary.start(
                             "predicate"
                         )
                     )
@@ -3941,7 +4002,7 @@ def normalize_validated_no_council_action_language(
             # Coordinated verbs can inherit the same explicit Council
             # subject:
             #   "The council adopted X, passed Y, and received Z."
-            clause_prefix = re.split(
+            coordinated_prefix = re.split(
                 r"[.!?;]",
                 prefix,
             )[-1]
@@ -3949,17 +4010,17 @@ def normalize_validated_no_council_action_language(
             if (
                 re.search(
                     r"\bcouncil\b",
-                    clause_prefix,
+                    coordinated_prefix,
                     re.I,
                 )
                 and re.search(
                     r"(?:,\s*(?:and\s+)?|\band\s+)$",
-                    clause_prefix,
+                    coordinated_prefix,
                     re.I,
                 )
                 and not re.search(
                     r"\b(?:not|never|whether|could|would|should|may|might|can)\b",
-                    clause_prefix,
+                    coordinated_prefix,
                     re.I,
                 )
             ):
@@ -3998,7 +4059,10 @@ def normalize_validated_no_council_action_language(
             if replacement_start is None:
                 continue
 
-            tail = cleaned[
+            # Compute clause boundaries and topic cues from the
+            # immutable original value. Later right-to-left rewrites
+            # must not erase the next action boundary.
+            tail = value[
                 start:
             ]
 
@@ -4011,11 +4075,11 @@ def normalize_validated_no_council_action_language(
                 + boundary.start()
                 if boundary
                 else len(
-                    cleaned
+                    value
                 )
             )
 
-            local = cleaned[
+            local = value[
                 start:local_end
             ]
 
