@@ -1332,6 +1332,137 @@ def _resolve_agenda_item(
 
 
 
+def _resolve_agenda_item_from_source_block(
+    topic,
+    proposed_item_number,
+    agenda_items,
+    agenda,
+):
+    """
+    Conservative fallback for an editorial coverage label whose
+    wording differs from the official agenda title but appears in
+    that item's official supporting block.
+
+    Example:
+      coverage: "Comprehensive Fee Study Receive and File"
+      agenda:   "ENCROACHMENT PERMIT DEPOSITS FOR PUBLIC UTILITIES"
+      item block: "Fee Study Follow-Up: Encroachment ..."
+
+    This fallback is intentionally narrower than title matching:
+      - requires at least two meaningful topic words in one official
+        item block;
+      - ignores generic editorial disposition words;
+      - prefers an exact proposed item number only when it also has
+        the required source-block overlap;
+      - otherwise requires one unique highest-scoring item.
+    """
+    topic_words = (
+        _action_words(
+            topic
+        )
+        - {
+            "complete",
+            "comprehensive",
+            "receive",
+            "received",
+            "file",
+            "filed",
+        }
+    )
+
+    if len(
+        topic_words
+    ) < 2:
+        return None
+
+    candidates = []
+
+    proposed = str(
+        proposed_item_number
+        or ""
+    ).strip()
+
+    for item in agenda_items:
+        item_number = str(
+            item.get(
+                "item_number",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not item_number:
+            continue
+
+        block = _agenda_item_source_block(
+            agenda,
+            item_number,
+        )
+
+        if not block:
+            continue
+
+        block_words = _action_words(
+            block
+        )
+
+        overlap = (
+            topic_words
+            & block_words
+        )
+
+        score = len(
+            overlap
+        )
+
+        if score < 2:
+            continue
+
+        candidates.append(
+            (
+                score,
+                item_number == proposed,
+                item,
+            )
+        )
+
+    if not candidates:
+        return None
+
+    exact = [
+        entry
+        for entry in candidates
+        if entry[1]
+    ]
+
+    if len(
+        exact
+    ) == 1:
+        return exact[0][2]
+
+    candidates.sort(
+        key=lambda entry: entry[0],
+        reverse=True,
+    )
+
+    best_score = candidates[0][0]
+
+    best = [
+        entry
+        for entry in candidates
+        if entry[0]
+        == best_score
+    ]
+
+    if len(
+        best
+    ) != 1:
+        return None
+
+    return best[0][2]
+
+
+
 def _action_norm(value):
     return re.sub(
         r"\s+",
@@ -5628,6 +5759,31 @@ receive an action-ledger disposition grounded in the source evidence.
             raw_status
         )
 
+        if (
+            not agenda_item
+            and status
+            not in ACTION_FORMAL_STATUSES
+        ):
+            agenda_item = (
+                _resolve_agenda_item_from_source_block(
+                    topic,
+                    proposed_item_number,
+                    agenda_items,
+                    agenda,
+                )
+            )
+
+            if agenda_item:
+                item_number = agenda_item[
+                    "item_number"
+                ]
+                agenda_section = agenda_item[
+                    "section"
+                ]
+                agenda_title = agenda_item[
+                    "title"
+                ]
+
         status_was_normalized = bool(
             raw_status
             and raw_status != status
@@ -8455,7 +8611,8 @@ def _agenda_item_source_block(
         return ""
 
     start_match = re.search(
-        rf"(?mi)^\s*{re.escape(item_number)}(?:\s+|$)",
+        rf"(?mi)^\s*{re.escape(item_number)}"
+        rf"(?:[.)])?(?:\s+|$)",
         agenda_text,
     )
 
