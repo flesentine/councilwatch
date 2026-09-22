@@ -4278,7 +4278,11 @@ def normalize_validated_no_council_action_language(
 
             if headline:
                 replacement = (
-                    "Takes No Action on "
+                    (
+                        "Council Takes No Action on "
+                        if passive_claim
+                        else "Takes No Action on "
+                    )
                     + subject
                 )
             else:
@@ -4297,7 +4301,12 @@ def normalize_validated_no_council_action_language(
                     + subject
                 )
 
-                if (
+                if passive_claim:
+                    replacement = (
+                        "The council "
+                        + replacement
+                    )
+                elif (
                     observed
                     and observed[0].isupper()
                 ):
