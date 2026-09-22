@@ -1464,6 +1464,105 @@ def test_no_council_action_guard_handles_completed_auxiliary_modifiers():
         ]
 
 
+
+def test_no_council_action_guard_preserves_inherited_subject_nonaction_clause():
+    story = make_story(
+        body=[
+            (
+                "The council approved the Main Street paving contract "
+                "and discussed traffic impacts."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "The council took no action on MAIN STREET PAVING CONTRACT "
+            "and discussed traffic impacts."
+        )
+    ]
+
+
+def test_no_council_action_guard_treats_earlier_in_same_meeting_as_current():
+    story = make_story(
+        body=[
+            (
+                "Earlier in the meeting, the council approved the "
+                "Main Street paving contract."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "Earlier in the meeting, the council took no action on "
+            "MAIN STREET PAVING CONTRACT."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_modified_recommendation_subjunctive():
+    original = (
+        "Staff recommended that the council unanimously approve the "
+        "Main Street paving contract."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
 def test_no_council_action_guard_leaves_unrelated_receive_language_unchanged():
     original = (
         "The council received a neighborhood traffic update "
