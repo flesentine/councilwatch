@@ -3808,6 +3808,17 @@ def normalize_validated_no_council_action_language(
         + action_surface
         + r"\b"
         r")|"
+        r"\s+\band\b\s+"
+        r"(?="
+        r"(?:discuss|discusses|discussed|discussing|"
+        r"consider|considers|considered|considering|"
+        r"review|reviews|reviewed|reviewing|"
+        r"hear|hears|heard|hearing|"
+        r"note|notes|noted|noting|"
+        r"debate|debates|debated|debating|"
+        r"question|questions|questioned|questioning)"
+        r"\b"
+        r")|"
         r",\s*"
         r"(?="
         r"(?:and\s+|but\s+)?"
@@ -3925,7 +3936,9 @@ def normalize_validated_no_council_action_language(
                     re.I,
                 )
                 or re.search(
-                    r"\b(?:previously|earlier|last\s+year|years?\s+ago|"
+                    r"\b(?:previously|"
+                    r"earlier\s+(?:year|month|week|meeting|session)|"
+                    r"last\s+year|years?\s+ago|"
                     r"(?:prior|previous)\s+meeting)\b",
                     history_scope,
                     re.I,
@@ -3954,7 +3967,9 @@ def normalize_validated_no_council_action_language(
                 r"propos(?:ed|es)|request(?:ed|s)?|ask(?:ed|s)?|"
                 r"urge(?:d|s)?)\b"
                 r"[^.!?;]{0,120}\b(?:that\s+)?"
-                r"(?:the\s+)?(?:city\s+)?council\s+$",
+                r"(?:the\s+)?(?:city\s+)?council"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
                 clause_prefix,
                 re.I,
             ):
