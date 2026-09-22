@@ -3814,7 +3814,8 @@ def normalize_validated_no_council_action_language(
         r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
         + action_surface
         + r"\b"
-        r")"
+        r")|"
+        r",\s*(?=(?:but|while|although|though|whereas)\b)"
         r")",
         re.I,
     )
@@ -3909,17 +3910,25 @@ def normalize_validated_no_council_action_language(
                 prefix,
             )[-1]
 
+            history_scope = re.sub(
+                r"^\s*(?:unlike|compared\s+(?:with|to)|"
+                r"in\s+contrast\s+(?:with|to))\s+[^,]+,\s*",
+                "",
+                clause_prefix,
+                flags=re.I,
+            )
+
             # Preserve historical context about prior council actions.
             if (
                 re.search(
                     r"\b(?:in|during|since|from)\s+(?:19|20)\d{2}\b",
-                    clause_prefix,
+                    history_scope,
                     re.I,
                 )
                 or re.search(
                     r"\b(?:previously|earlier|last\s+year|years?\s+ago|"
                     r"(?:prior|previous)\s+meeting)\b",
-                    clause_prefix,
+                    history_scope,
                     re.I,
                 )
                 or re.search(
@@ -3928,7 +3937,7 @@ def normalize_validated_no_council_action_language(
                     r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
                     r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+"
                     r"\d{1,2}(?:,\s*(?:19|20)\d{2})?\b",
-                    clause_prefix,
+                    history_scope,
                     re.I,
                 )
             ):
@@ -4028,7 +4037,8 @@ def normalize_validated_no_council_action_language(
 
             if (
                 re.search(
-                    r"\bcouncil\b",
+                    r"(?:^|[,;]\s*)"
+                    r"(?:the\s+)?(?:city\s+)?council\b",
                     coordinated_prefix,
                     re.I,
                 )
@@ -4069,11 +4079,73 @@ def normalize_validated_no_council_action_language(
             ):
                 continue
 
-            replacement_start = (
-                affirmative_replacement_start(
-                    start
+            sentence_start = max(
+                value.rfind(
+                    ".",
+                    0,
+                    start,
+                ),
+                value.rfind(
+                    "!",
+                    0,
+                    start,
+                ),
+                value.rfind(
+                    "?",
+                    0,
+                    start,
+                ),
+                value.rfind(
+                    ";",
+                    0,
+                    start,
+                ),
+            ) + 1
+
+            passive_prefix = value[
+                sentence_start:start
+            ]
+
+            passive_suffix = value[
+                end:
+            ]
+
+            passive_by = re.match(
+                r"\s+by\s+(?:the\s+)?(?:city\s+)?council\b",
+                passive_suffix,
+                re.I,
+            )
+
+            passive_claim = bool(
+                passive_by
+                and re.search(
+                    r"\b(?:was|were|is|are|has\s+been|have\s+been|had\s+been)\s+$",
+                    passive_prefix,
+                    re.I,
                 )
             )
+
+            if passive_claim:
+                leading = re.match(
+                    r"\s*",
+                    value[
+                        sentence_start:
+                    ],
+                )
+                replacement_start = (
+                    sentence_start
+                    + len(
+                        leading.group(
+                            0
+                        )
+                    )
+                )
+            else:
+                replacement_start = (
+                    affirmative_replacement_start(
+                        start
+                    )
+                )
 
             if replacement_start is None:
                 continue
@@ -4123,6 +4195,15 @@ def normalize_validated_no_council_action_language(
                 else local
             )
 
+            if passive_claim:
+                governed_local = (
+                    value[
+                        replacement_start:start
+                    ]
+                    + " "
+                    + governed_local
+                )
+
             local_cues = topic_words(
                 governed_local
             )
@@ -4161,18 +4242,37 @@ def normalize_validated_no_council_action_language(
                 in candidates
             )
 
-            best = [
-                record
-                for score, record
-                in candidates
-                if score
-                == best_score
-            ]
+            best_by_subject = {}
 
-            if len(best) != 1:
+            for score, record in candidates:
+                if score != best_score:
+                    continue
+
+                subject_key = str(
+                    record.get(
+                        "subject",
+                        "",
+                    )
+                    or ""
+                ).strip().casefold()
+
+                if subject_key:
+                    best_by_subject[
+                        subject_key
+                    ] = record
+
+            if len(
+                best_by_subject
+            ) != 1:
                 continue
 
-            subject = best[0][
+            best = next(
+                iter(
+                    best_by_subject.values()
+                )
+            )
+
+            subject = best[
                 "subject"
             ]
 
