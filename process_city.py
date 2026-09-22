@@ -3815,7 +3815,16 @@ def normalize_validated_no_council_action_language(
         + action_surface
         + r"\b"
         r")|"
-        r",\s*(?=(?:but|while|although|though|whereas)\b)"
+        r",\s*(?=(?:but|while|although|though|whereas)\b)|"
+        r",\s+and\s+"
+        r"(?="
+        r"(?:the\s+)?"
+        r"(?:residents?|staff|members?|officials?|speakers?|neighbors?|"
+        r"public|commission|board|mayor|developer|applicant)\b"
+        r"[^,;.!?]{0,60}\b"
+        r"(?:is|are|was|were|has|have|had|did|does|"
+        r"[a-z][a-z'-]*(?:ed|ing|s))\b"
+        r")"
         r")",
         re.I,
     )
@@ -4010,7 +4019,9 @@ def normalize_validated_no_council_action_language(
             auxiliary = re.search(
                 r"\b(?:the\s+)?(?:city\s+)?council\s+"
                 r"(?P<predicate>"
-                r"(?:has|had)\s+|"
+                r"(?:did|does)\s+|"
+                r"(?:has|had)\s+"
+                r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*|"
                 r"(?:votes?|voted)\s+to\s+"
                 r")$",
                 prefix,
@@ -4136,7 +4147,9 @@ def normalize_validated_no_council_action_language(
             ]
 
             passive_by = re.match(
-                r"\s+by\s+(?:the\s+)?(?:city\s+)?council\b",
+                r"\s+"
+                r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
+                r"by\s+(?:the\s+)?(?:city\s+)?council\b",
                 passive_suffix,
                 re.I,
             )
