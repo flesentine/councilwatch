@@ -4036,11 +4036,18 @@ def normalize_validated_no_council_action_language(
             )[-1]
 
             if (
-                re.search(
-                    r"(?:^|[,;]\s*)"
-                    r"(?:the\s+)?(?:city\s+)?council\b",
-                    coordinated_prefix,
-                    re.I,
+                (
+                    re.search(
+                        r"(?:^|[,;]\s*)"
+                        r"(?:[Tt]he\s+)?(?:[Cc]ity\s+)?[Cc]ouncil\b",
+                        coordinated_prefix,
+                    )
+                    or re.search(
+                        r"(?:^|[,;]\s*)"
+                        r"(?:[A-Z][A-Za-z'-]*\s+){1,4}"
+                        r"[Cc]ity\s+[Cc]ouncil\b",
+                        coordinated_prefix,
+                    )
                 )
                 and re.search(
                     r"(?:,\s*(?:and\s+)?|\band\s+)$",
