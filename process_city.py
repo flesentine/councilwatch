@@ -3917,10 +3917,29 @@ def normalize_validated_no_council_action_language(
                     re.I,
                 )
                 or re.search(
-                    r"\b(?:previously|earlier|last\s+year|years?\s+ago|prior\s+meeting)\b",
+                    r"\b(?:previously|earlier|last\s+year|years?\s+ago|"
+                    r"(?:prior|previous)\s+meeting)\b",
                     clause_prefix,
                     re.I,
                 )
+                or re.search(
+                    r"\b(?:on|at)\s+"
+                    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+                    r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+"
+                    r"\d{1,2}(?:,\s*(?:19|20)\d{2})?\b",
+                    clause_prefix,
+                    re.I,
+                )
+            ):
+                return None
+
+            # Conditional framing is non-assertive and must survive:
+            #   "If the council approves ..."
+            if re.search(
+                r"\b(?:if|unless|assuming|provided\s+that)\b",
+                clause_prefix,
+                re.I,
             ):
                 return None
 
@@ -3958,13 +3977,14 @@ def normalize_validated_no_council_action_language(
             ):
                 return start
 
-            # Reader-facing copy can use a finite auxiliary.
-            # Replace the whole predicate rather than leaving a
-            # dangling "has" / "had" before the generated phrase.
+            # Reader-facing copy can use a finite auxiliary or
+            # a completed vote-to construction. Replace the whole
+            # predicate rather than leaving a dangling helper phrase.
             auxiliary = re.search(
                 r"\b(?:the\s+)?(?:city\s+)?council\s+"
                 r"(?P<predicate>"
-                r"(?:has|had)\s+"
+                r"(?:has|had)\s+|"
+                r"(?:votes?|voted)\s+to\s+"
                 r")$",
                 prefix,
                 re.I,
@@ -3978,14 +3998,13 @@ def normalize_validated_no_council_action_language(
                     )
                 )
 
-            # Headlines also commonly use "votes to" or future-style
-            # auxiliary wording.
+            # Headlines also commonly use future-style auxiliary
+            # wording.
             if headline:
                 headline_auxiliary = re.search(
                     r"\b(?:the\s+)?(?:city\s+)?council\s+"
                     r"(?P<predicate>"
-                    r"will\s+|"
-                    r"votes?\s+to\s+"
+                    r"will\s+"
                     r")$",
                     prefix,
                     re.I,
@@ -4083,8 +4102,29 @@ def normalize_validated_no_council_action_language(
                 start:local_end
             ]
 
+            # Bind topic cues to the action's object, not to a later
+            # subordinate explanation or discussion.
+            subordinate = re.search(
+                r"\s+(?:after|before|while|when)\s+"
+                r"(?:"
+                r"(?:the|staff|members?|officials?)\b|"
+                r"(?:a|an)\s+(?:discussion|presentation|hearing|review)\b|"
+                r"(?:discussing|considering|reviewing|hearing|receiving|"
+                r"noting|learning|presenting)\b"
+                r")|"
+                r"\s+(?:because|although|though|whereas)\b",
+                local,
+                re.I,
+            )
+
+            governed_local = (
+                local[:subordinate.start()]
+                if subordinate
+                else local
+            )
+
             local_cues = topic_words(
-                local
+                governed_local
             )
 
             candidates = []
