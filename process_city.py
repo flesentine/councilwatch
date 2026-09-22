@@ -3893,18 +3893,9 @@ def normalize_validated_no_council_action_language(
 
             return False
 
-        def affirmative_replacement_start(
-            start,
+        def is_noncurrent_or_nonassertive_context(
+            prefix,
         ):
-            prefix_start = max(
-                0,
-                start - 160,
-            )
-
-            prefix = cleaned[
-                prefix_start:start
-            ]
-
             clause_prefix = re.split(
                 r"[.!?]",
                 prefix,
@@ -3918,7 +3909,6 @@ def normalize_validated_no_council_action_language(
                 flags=re.I,
             )
 
-            # Preserve historical context about prior council actions.
             if (
                 re.search(
                     r"\b(?:in|during|since|from)\s+(?:19|20)\d{2}\b",
@@ -3941,14 +3931,42 @@ def normalize_validated_no_council_action_language(
                     re.I,
                 )
             ):
-                return None
+                return True
 
-            # Conditional framing is non-assertive and must survive:
-            #   "If the council approves ..."
             if re.search(
                 r"\b(?:if|unless|assuming|provided\s+that)\b",
                 clause_prefix,
                 re.I,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:recommend(?:ed|s)?|suggest(?:ed|s)?|"
+                r"propos(?:ed|es)|request(?:ed|s)?|ask(?:ed|s)?|"
+                r"urge(?:d|s)?)\b"
+                r"[^.!?;]{0,120}\b(?:that\s+)?"
+                r"(?:the\s+)?(?:city\s+)?council\s+$",
+                clause_prefix,
+                re.I,
+            ):
+                return True
+
+            return False
+
+        def affirmative_replacement_start(
+            start,
+        ):
+            prefix_start = max(
+                0,
+                start - 160,
+            )
+
+            prefix = cleaned[
+                prefix_start:start
+            ]
+
+            if is_noncurrent_or_nonassertive_context(
+                prefix
             ):
                 return None
 
@@ -4132,15 +4150,43 @@ def normalize_validated_no_council_action_language(
                 )
             )
 
+            passive_clause_start = sentence_start
+
+            if passive_claim:
+                left_boundary = None
+
+                for candidate in re.finditer(
+                    r",\s*(?:and|but|while|although|though|whereas)\s+|"
+                    r";\s*",
+                    passive_prefix,
+                    re.I,
+                ):
+                    left_boundary = candidate
+
+                if left_boundary:
+                    passive_clause_start = (
+                        sentence_start
+                        + left_boundary.end()
+                    )
+
+                passive_clause_prefix = value[
+                    passive_clause_start:start
+                ]
+
+                if is_noncurrent_or_nonassertive_context(
+                    passive_clause_prefix
+                ):
+                    passive_claim = False
+
             if passive_claim:
                 leading = re.match(
                     r"\s*",
                     value[
-                        sentence_start:
+                        passive_clause_start:
                     ],
                 )
                 replacement_start = (
-                    sentence_start
+                    passive_clause_start
                     + len(
                         leading.group(
                             0
@@ -4309,8 +4355,34 @@ def normalize_validated_no_council_action_language(
                 )
 
                 if passive_claim:
+                    sentence_initial = (
+                        replacement_start
+                        <= sentence_start
+                        + len(
+                            value[
+                                sentence_start:
+                                replacement_start
+                            ]
+                        )
+                    )
+
                     replacement = (
-                        "The council "
+                        (
+                            "The council "
+                            if replacement_start
+                            == sentence_start
+                            + len(
+                                re.match(
+                                    r"\s*",
+                                    value[
+                                        sentence_start:
+                                    ],
+                                ).group(
+                                    0
+                                )
+                            )
+                            else "the council "
+                        )
                         + replacement
                     )
                 elif (
