@@ -1185,7 +1185,7 @@ def test_no_council_action_guard_normalizes_passive_council_action():
 
     assert story.body == [
         (
-            "took no action on MAIN STREET PAVING CONTRACT."
+            "The council took no action on MAIN STREET PAVING CONTRACT."
         )
     ]
 
@@ -1205,7 +1205,7 @@ def test_no_council_action_guard_deduplicates_same_agenda_identity():
                 agenda_title="MAIN STREET PAVING CONTRACT",
             ),
             action(
-                "Main Street Contract Approve",
+                "Main Street Paving Contract Approve",
                 "no council action",
                 agenda_title="MAIN STREET PAVING CONTRACT",
             ),
