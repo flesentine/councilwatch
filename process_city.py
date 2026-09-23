@@ -3975,6 +3975,17 @@ def normalize_validated_no_council_action_language(
             ):
                 return True
 
+            if re.search(
+                r"\b(?:do|does|did|could|would|should|may|might|can|will|"
+                r"has|have|had|is|are|was|were)\s+"
+                r"(?:the\s+)?(?:city\s+)?council"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ):
+                return True
+
             return False
 
         def affirmative_replacement_start(
@@ -4037,7 +4048,10 @@ def normalize_validated_no_council_action_language(
                 r"(?:did|does)\s+|"
                 r"(?:has|had)\s+"
                 r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*|"
-                r"(?:votes?|voted)\s+to\s+"
+                r"(?:votes?|voted)\s+"
+                r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                r"to\s+"
                 r")$",
                 prefix,
                 re.I,
@@ -4284,6 +4298,32 @@ def normalize_validated_no_council_action_language(
                     + " "
                     + governed_local
                 )
+
+            if (
+                re.search(
+                    r"\b(?:in|during|since|from)\s+(?:19|20)\d{2}\b",
+                    governed_local,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:previously|"
+                    r"earlier\s+(?:year|month|week|meeting|session)|"
+                    r"last\s+year|years?\s+ago|"
+                    r"(?:prior|previous)\s+meeting)\b",
+                    governed_local,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:on|at)\s+"
+                    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+                    r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+"
+                    r"\d{1,2}(?:,\s*(?:19|20)\d{2})?\b",
+                    governed_local,
+                    re.I,
+                )
+            ):
+                continue
 
             local_cues = topic_words(
                 governed_local
