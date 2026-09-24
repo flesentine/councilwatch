@@ -1875,6 +1875,143 @@ def test_no_council_action_guard_preserves_modal_coordinated_clause():
     ]
 
 
+
+def test_no_council_action_guard_preserves_coordinated_objects():
+    story = make_story(
+        body=[
+            (
+                "The council approved the Main Street plans and "
+                "specifications."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Plans and Specifications Approve",
+                "no council action",
+                agenda_title="MAIN STREET PLANS AND SPECIFICATIONS",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "The council took no action on "
+            "MAIN STREET PLANS AND SPECIFICATIONS."
+        )
+    ]
+
+
+def test_no_council_action_guard_scopes_condition_to_action_clause():
+    story = make_story(
+        body=[
+            (
+                "Even if residents objected, the council approved the "
+                "Main Street paving contract."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "Even if residents objected, the council took no action on "
+            "MAIN STREET PAVING CONTRACT."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_earlier_period_history():
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    for original in (
+        (
+            "Earlier this year, the council approved the Main Street "
+            "paving contract."
+        ),
+        (
+            "Earlier in the year, the council approved the Main Street "
+            "paving contract."
+        ),
+    ):
+        story = make_story(
+            body=[
+                original,
+            ]
+        )
+
+        assert not pc.normalize_validated_no_council_action_language(
+            story,
+            intelligence,
+        )
+
+        assert story.body == [
+            original,
+        ]
+
+
+def test_no_council_action_guard_preserves_unpunctuated_clause_before_passive():
+    story = make_story(
+        body=[
+            (
+                "Residents objected and the Main Street paving contract "
+                "was approved by the council."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "Residents objected and the council took no action on "
+            "MAIN STREET PAVING CONTRACT."
+        )
+    ]
+
+
 def test_no_council_action_guard_leaves_unrelated_receive_language_unchanged():
     original = (
         "The council received a neighborhood traffic update "
