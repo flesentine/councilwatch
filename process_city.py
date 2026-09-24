@@ -3615,6 +3615,31 @@ def normalize_validated_no_council_action_language(
     }
 
     generic_words = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "into",
+        "onto",
+        "over",
+        "under",
+        "about",
+        "after",
+        "before",
+        "during",
+        "through",
+        "between",
+        "among",
+        "that",
+        "this",
+        "these",
+        "those",
+        "their",
+        "there",
+        "then",
+        "than",
+        "also",
         "agenda",
         "city",
         "complete",
@@ -3811,7 +3836,8 @@ def normalize_validated_no_council_action_language(
         r"\s+\band\b\s+"
         r"(?="
         r"(?:"
-        r"(?:is|are|was|were|has|have|had|did|does)\b|"
+        r"(?:is|are|was|were|has|have|had|did|does|"
+        r"can|could|may|might|must|shall|should|will|would)\b|"
         r"[a-z][a-z'-]*(?:ed|ing|s)\b|"
         r"(?:met|held|left|went|spoke|read|set|put|made|took|gave|heard)\b"
         r")"
@@ -3831,6 +3857,7 @@ def normalize_validated_no_council_action_language(
         r"public|commission|board|mayor|developer|applicant)\b"
         r"[^,;.!?]{0,60}\b"
         r"(?:is|are|was|were|has|have|had|did|does|"
+        r"can|could|may|might|must|shall|should|will|would|"
         r"[a-z][a-z'-]*(?:ed|ing|s))\b"
         r")"
         r")",
@@ -3987,6 +4014,7 @@ def normalize_validated_no_council_action_language(
 
         def affirmative_replacement_start(
             start,
+            observed,
         ):
             prefix_start = max(
                 0,
@@ -3999,6 +4027,17 @@ def normalize_validated_no_council_action_language(
 
             if is_noncurrent_or_nonassertive_context(
                 prefix
+            ):
+                return None
+
+            # A bare Council-subject gerund is not a finite action
+            # assertion:
+            #   "The council adopting X would ..."
+            #   "the possibility of the council adopting X ..."
+            if str(
+                observed or ""
+            ).lower().endswith(
+                "ing"
             ):
                 return None
 
@@ -4243,7 +4282,8 @@ def normalize_validated_no_council_action_language(
             else:
                 replacement_start = (
                     affirmative_replacement_start(
-                        start
+                        start,
+                        observed,
                     )
                 )
 
