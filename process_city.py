@@ -3858,7 +3858,7 @@ def normalize_validated_no_council_action_language(
         r"[^,;.!?]{0,60}\b"
         r"(?:is|are|was|were|has|have|had|did|does|"
         r"can|could|may|might|must|shall|should|will|would|"
-        r"[a-z][a-z'-]*(?:ed|ing))\b(?=\s+[^,;.!?]+)"
+        r"[a-z][a-z'-]*(?:ed|ing|s))\b"
         r")"
         r")",
         re.I,
