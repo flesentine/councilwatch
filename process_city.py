@@ -3810,14 +3810,11 @@ def normalize_validated_no_council_action_language(
         r")|"
         r"\s+\band\b\s+"
         r"(?="
-        r"(?:discuss|discusses|discussed|discussing|"
-        r"consider|considers|considered|considering|"
-        r"review|reviews|reviewed|reviewing|"
-        r"hear|hears|heard|hearing|"
-        r"note|notes|noted|noting|"
-        r"debate|debates|debated|debating|"
-        r"question|questions|questioned|questioning)"
-        r"\b"
+        r"(?:"
+        r"(?:is|are|was|were|has|have|had|did|does)\b|"
+        r"[a-z][a-z'-]*(?:ed|ing|s)\b|"
+        r"(?:met|held|left|went|spoke|read|set|put|made|took|gave|heard)\b"
+        r")"
         r")|"
         r",\s*"
         r"(?="
@@ -4178,18 +4175,26 @@ def normalize_validated_no_council_action_language(
             passive_by = re.match(
                 r"\s+"
                 r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
-                r"by\s+(?:the\s+)?(?:city\s+)?council\b",
+                r"by\s+(?:the\s+)?"
+                r"(?:"
+                r"(?:[A-Za-z][A-Za-z'-]*\s+){1,4}city\s+council|"
+                r"(?:city\s+)?council"
+                r")\b",
                 passive_suffix,
+                re.I,
+            )
+
+            passive_auxiliary = re.search(
+                r"\b(?P<auxiliary>"
+                r"was|were|is|are|has\s+been|have\s+been|had\s+been"
+                r")\s+$",
+                passive_prefix,
                 re.I,
             )
 
             passive_claim = bool(
                 passive_by
-                and re.search(
-                    r"\b(?:was|were|is|are|has\s+been|have\s+been|had\s+been)\s+$",
-                    passive_prefix,
-                    re.I,
-                )
+                and passive_auxiliary
             )
 
             passive_clause_start = sentence_start
@@ -4408,7 +4413,19 @@ def normalize_validated_no_council_action_language(
                 )
             else:
                 present_like = (
-                    observed.lower().endswith(
+                    passive_claim
+                    and passive_auxiliary
+                    and passive_auxiliary.group(
+                        "auxiliary"
+                    ).lower() in {
+                        "is",
+                        "are",
+                        "has been",
+                        "have been",
+                    }
+                ) or (
+                    not passive_claim
+                    and observed.lower().endswith(
                         "s"
                     )
                 )
