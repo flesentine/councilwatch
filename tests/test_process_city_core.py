@@ -2012,6 +2012,110 @@ def test_no_council_action_guard_preserves_unpunctuated_clause_before_passive():
     ]
 
 
+
+def test_no_council_action_guard_handles_council_member_subjects():
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    for original in (
+        "Council members approved the Main Street paving contract.",
+        "City Council members approved the Main Street paving contract.",
+    ):
+        story = make_story(
+            body=[
+                original,
+            ]
+        )
+
+        assert pc.normalize_validated_no_council_action_language(
+            story,
+            intelligence,
+        )
+
+        assert story.body == [
+            "Council members took no action on MAIN STREET PAVING CONTRACT."
+            if original.startswith("Council members")
+            else "City Council members took no action on MAIN STREET PAVING CONTRACT."
+        ]
+
+
+def test_no_council_action_guard_preserves_multiword_actor_clause():
+    story = make_story(
+        body=[
+            (
+                "The council approved the Main Street paving contract, "
+                "and the planning commission scheduled a hearing."
+            )
+        ]
+    )
+
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "The council took no action on MAIN STREET PAVING CONTRACT, "
+            "and the planning commission scheduled a hearing."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_direct_quotes():
+    intelligence = {
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ]
+    }
+
+    for original in (
+        (
+            'A resident said, "The council approved the Main Street '
+            'paving contract."'
+        ),
+        (
+            "A resident said, “The council approved the Main Street "
+            "paving contract.”"
+        ),
+    ):
+        story = make_story(
+            body=[
+                original,
+            ]
+        )
+
+        assert not pc.normalize_validated_no_council_action_language(
+            story,
+            intelligence,
+        )
+
+        assert story.body == [
+            original,
+        ]
+
+
 def test_no_council_action_guard_leaves_unrelated_receive_language_unchanged():
     original = (
         "The council received a neighborhood traffic update "
