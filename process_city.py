@@ -3838,7 +3838,7 @@ def normalize_validated_no_council_action_language(
         r"(?:"
         r"(?:is|are|was|were|has|have|had|did|does|"
         r"can|could|may|might|must|shall|should|will|would)\b|"
-        r"[a-z][a-z'-]*(?:ed|ing|s)\b|"
+        r"[a-z][a-z'-]*(?:ed|ing)\b(?=\s+[^,;.!?]+)|"
         r"(?:met|held|left|went|spoke|read|set|put|made|took|gave|heard)\b"
         r")"
         r")|"
@@ -3858,7 +3858,7 @@ def normalize_validated_no_council_action_language(
         r"[^,;.!?]{0,60}\b"
         r"(?:is|are|was|were|has|have|had|did|does|"
         r"can|could|may|might|must|shall|should|will|would|"
-        r"[a-z][a-z'-]*(?:ed|ing|s))\b"
+        r"[a-z][a-z'-]*(?:ed|ing))\b(?=\s+[^,;.!?]+)"
         r")"
         r")",
         re.I,
@@ -3961,7 +3961,12 @@ def normalize_validated_no_council_action_language(
                 )
                 or re.search(
                     r"\b(?:previously|"
-                    r"earlier\s+(?:year|month|week|meeting|session)|"
+                    r"earlier\s+(?:"
+                    r"(?:this|last|prior|previous)\s+)?"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+in\s+(?:the|that)\s+"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+meeting|"
                     r"last\s+year|years?\s+ago|"
                     r"(?:prior|previous)\s+meeting)\b",
                     history_scope,
@@ -3979,9 +3984,14 @@ def normalize_validated_no_council_action_language(
             ):
                 return True
 
+            conditional_scope = re.split(
+                r",\s*",
+                clause_prefix,
+            )[-1]
+
             if re.search(
                 r"\b(?:if|unless|assuming|provided\s+that)\b",
-                clause_prefix,
+                conditional_scope,
                 re.I,
             ):
                 return True
@@ -4243,7 +4253,12 @@ def normalize_validated_no_council_action_language(
 
                 for candidate in re.finditer(
                     r",\s*(?:and|but|while|although|though|whereas)\s+|"
-                    r";\s*",
+                    r";\s*|"
+                    r"\band\s+(?="
+                    r"[^,;.!?]{1,160}\b"
+                    r"(?:was|were|is|are|has\s+been|have\s+been|had\s+been)"
+                    r"\s+$"
+                    r")",
                     passive_prefix,
                     re.I,
                 ):
@@ -4352,7 +4367,12 @@ def normalize_validated_no_council_action_language(
                 )
                 or re.search(
                     r"\b(?:previously|"
-                    r"earlier\s+(?:year|month|week|meeting|session)|"
+                    r"earlier\s+(?:"
+                    r"(?:this|last|prior|previous)\s+)?"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+in\s+(?:the|that)\s+"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+meeting|"
                     r"last\s+year|years?\s+ago|"
                     r"(?:prior|previous)\s+meeting)\b",
                     governed_local,
