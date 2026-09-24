@@ -3853,9 +3853,14 @@ def normalize_validated_no_council_action_language(
         r",\s+and\s+"
         r"(?="
         r"(?:the\s+)?"
+        r"(?:"
+        r"(?:[a-z][a-z'-]*\s+){0,3}"
         r"(?:residents?|staff|members?|officials?|speakers?|neighbors?|"
-        r"public|commission|board|mayor|developer|applicant)\b"
-        r"[^,;.!?]{0,60}\b"
+        r"public|commission|board|developer|applicant)|"
+        r"(?:mayor|councilmember|commissioner)"
+        r"(?:\s+[a-z][a-z'-]*){0,3}"
+        r")\b"
+        r"[^,;.!?]{0,40}\b"
         r"(?:is|are|was|were|has|have|had|did|does|"
         r"can|could|may|might|must|shall|should|will|would|"
         r"[a-z][a-z'-]*(?:ed|ing|s))\b"
@@ -3894,6 +3899,29 @@ def normalize_validated_no_council_action_language(
             return value
 
         cleaned = value
+
+        def is_inside_direct_quote(
+            start,
+        ):
+            before = value[
+                :start
+            ]
+
+            # Straight double quotes use parity.
+            if before.count(
+                '"'
+            ) % 2:
+                return True
+
+            # Curly quotation marks use the most recent opener/closer.
+            if before.rfind(
+                "“"
+            ) > before.rfind(
+                "”"
+            ):
+                return True
+
+            return False
 
         def is_generated_no_action_context(
             start,
@@ -4077,7 +4105,7 @@ def normalize_validated_no_council_action_language(
                 return None
 
             if re.search(
-                r"\b(?:the\s+)?(?:city\s+)?council"
+                r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
                 r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))?"
                 r"\s+$",
                 prefix,
@@ -4089,7 +4117,7 @@ def normalize_validated_no_council_action_language(
             # a completed vote-to construction. Replace the whole
             # predicate rather than leaving a dangling helper phrase.
             auxiliary = re.search(
-                r"\b(?:the\s+)?(?:city\s+)?council\s+"
+                r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?\s+"
                 r"(?P<predicate>"
                 r"(?:did|does)\s+|"
                 r"(?:has|had)\s+"
@@ -4115,7 +4143,7 @@ def normalize_validated_no_council_action_language(
             # wording.
             if headline:
                 headline_auxiliary = re.search(
-                    r"\b(?:the\s+)?(?:city\s+)?council\s+"
+                    r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?\s+"
                     r"(?P<predicate>"
                     r"will\s+"
                     r")$",
@@ -4143,7 +4171,8 @@ def normalize_validated_no_council_action_language(
                 (
                     re.search(
                         r"(?:^|[,;]\s*)"
-                        r"(?:[Tt]he\s+)?(?:[Cc]ity\s+)?[Cc]ouncil\b",
+                        r"(?:[Tt]he\s+)?(?:[Cc]ity\s+)?[Cc]ouncil"
+                        r"(?:\s+[Mm]embers)?\b",
                         coordinated_prefix,
                     )
                     or re.search(
@@ -4186,6 +4215,11 @@ def normalize_validated_no_council_action_language(
                 continue
 
             if is_generated_no_action_context(
+                start
+            ):
+                continue
+
+            if is_inside_direct_quote(
                 start
             ):
                 continue
