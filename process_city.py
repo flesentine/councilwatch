@@ -3944,6 +3944,22 @@ def normalize_validated_no_council_action_language(
                 r"\b(?:a|p)\.m\.$",
                 before,
             ):
+                remainder = text[
+                    position + 1:
+                ]
+                next_nonspace = re.search(
+                    r"\S",
+                    remainder,
+                )
+
+                if (
+                    next_nonspace
+                    and remainder[
+                        next_nonspace.start()
+                    ].isupper()
+                ):
+                    return False
+
                 return True
 
             if re.search(
@@ -4193,6 +4209,26 @@ def normalize_validated_no_council_action_language(
                 return True
 
             if re.search(
+                r"\b(?:denied?|disputed?|refuted?|contested?)\b"
+                r"[^.!?;]{0,120}\bthat\s+"
+                r"(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ) or re.search(
+                r"\b(?:did|does|do)\s+not\s+"
+                r"(?:say|state|confirm|report|claim|assert)\b"
+                r"[^.!?;]{0,120}\bthat\s+"
+                r"(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ):
+                return True
+
+            if re.search(
                 r"\b(?:do|does|did|could|would|should|may|might|can|will|"
                 r"has|have|had|is|are|was|were)\s+"
                 r"(?:the\s+)?(?:city\s+)?council"
@@ -4222,6 +4258,45 @@ def normalize_validated_no_council_action_language(
                 prefix
             ):
                 return None
+
+            named_city_council = re.search(
+                r"\b(?P<name>(?:[A-Z][A-Za-z'-]*\s+){1,4})"
+                r"City\s+Council(?:\s+Members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                prefix,
+            )
+
+            if named_city_council:
+                named_city = " ".join(
+                    named_city_council.group(
+                        "name"
+                    ).split()
+                )
+
+                if named_city.lower().startswith(
+                    "the "
+                ):
+                    named_city = named_city[
+                        4:
+                    ]
+
+                meeting_city = " ".join(
+                    str(
+                        intelligence.get(
+                            "city_name",
+                            "",
+                        )
+                        or ""
+                    ).split()
+                )
+
+                if (
+                    not meeting_city
+                    or named_city.lower()
+                    != meeting_city.lower()
+                ):
+                    return None
 
             # Do not apply this city's action ledger to another
             # governing body merely because its name ends in "council".
@@ -6654,6 +6729,15 @@ def process_city(
                 ),
                 encoding="utf-8",
             )
+
+        intelligence.setdefault(
+            "city_name",
+            city,
+        )
+        intelligence.setdefault(
+            "city_slug",
+            slug,
+        )
 
         print()
         print("Coverage plan:")
