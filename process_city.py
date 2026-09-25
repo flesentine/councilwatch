@@ -4068,6 +4068,29 @@ def normalize_validated_no_council_action_language(
             ):
                 return None
 
+            # Do not apply this city's action ledger to another
+            # governing body merely because its name ends in "council".
+            qualified_council = re.search(
+                r"\b(?P<qualifier>[a-z][a-z'-]+)\s+"
+                r"council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                prefix,
+                re.I,
+            )
+
+            if (
+                qualified_council
+                and qualified_council.group(
+                    "qualifier"
+                ).lower()
+                not in {
+                    "the",
+                    "city",
+                }
+            ):
+                return None
+
             # A bare Council-subject gerund is not a finite action
             # assertion:
             #   "The council adopting X would ..."
@@ -4224,6 +4247,52 @@ def normalize_validated_no_council_action_language(
             ):
                 continue
 
+            question_sentence_start = max(
+                value.rfind(
+                    ".",
+                    0,
+                    start,
+                ),
+                value.rfind(
+                    "!",
+                    0,
+                    start,
+                ),
+                value.rfind(
+                    "?",
+                    0,
+                    start,
+                ),
+            ) + 1
+
+            question_sentence_end = len(
+                value
+            )
+
+            for punctuation in ".!?":
+                candidate_end = value.find(
+                    punctuation,
+                    start,
+                )
+
+                if (
+                    candidate_end != -1
+                    and candidate_end
+                    < question_sentence_end
+                ):
+                    question_sentence_end = candidate_end
+
+            if (
+                question_sentence_end
+                < len(
+                    value
+                )
+                and value[
+                    question_sentence_end
+                ] == "?"
+            ):
+                continue
+
             sentence_start = max(
                 value.rfind(
                     ".",
@@ -4373,7 +4442,10 @@ def normalize_validated_no_council_action_language(
                 r"(?:discussing|considering|reviewing|hearing|receiving|"
                 r"noting|learning|presenting)\b"
                 r")|"
-                r"\s+(?:because|although|though|whereas)\b",
+                r"\s+(?:because|although|though|whereas)\b|"
+                r",\s*(?:which|who|whom|whose)\b|"
+                r"\s+to\s+(?:fund|finance|support|pay|provide|enable|allow|"
+                r"help|build|construct|improve|expand|address|cover)\b",
                 local,
                 re.I,
             )
