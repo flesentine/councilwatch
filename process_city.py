@@ -3900,6 +3900,156 @@ def normalize_validated_no_council_action_language(
 
         cleaned = value
 
+        def is_abbreviation_period(
+            text,
+            position,
+        ):
+            if (
+                position < 0
+                or position >= len(
+                    text
+                )
+                or text[
+                    position
+                ] != "."
+            ):
+                return False
+
+            before = text[
+                :position + 1
+            ].lower()
+
+            after = text[
+                position + 1:
+                position + 4
+            ].lower()
+
+            if (
+                re.search(
+                    r"\b(?:a|p)\.$",
+                    before,
+                )
+                and after.startswith(
+                    "m."
+                )
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:a|p)\.m\.$",
+                before,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+                r"mr|mrs|ms|dr|prof|sr|jr|st|ave|blvd|rd|inc|etc)\.$",
+                before,
+            ):
+                return True
+
+            return False
+
+        def previous_sentence_boundary(
+            text,
+            position,
+            *,
+            include_semicolon=False,
+        ):
+            punctuation = ".!?"
+            if include_semicolon:
+                punctuation += ";"
+
+            for index in range(
+                position - 1,
+                -1,
+                -1,
+            ):
+                if text[
+                    index
+                ] not in punctuation:
+                    continue
+
+                if (
+                    text[
+                        index
+                    ] == "."
+                    and is_abbreviation_period(
+                        text,
+                        index,
+                    )
+                ):
+                    continue
+
+                return index
+
+            return -1
+
+        def next_sentence_boundary(
+            text,
+            position,
+        ):
+            for index in range(
+                position,
+                len(
+                    text
+                ),
+            ):
+                if text[
+                    index
+                ] not in ".!?":
+                    continue
+
+                if (
+                    text[
+                        index
+                    ] == "."
+                    and is_abbreviation_period(
+                        text,
+                        index,
+                    )
+                ):
+                    continue
+
+                return index
+
+            return len(
+                text
+            )
+
+        def find_next_action_boundary(
+            text,
+        ):
+            search_from = 0
+
+            while True:
+                candidate = next_action_boundary.search(
+                    text,
+                    search_from,
+                )
+
+                if not candidate:
+                    return None
+
+                position = candidate.start()
+
+                if (
+                    position < len(
+                        text
+                    )
+                    and text[
+                        position
+                    ] == "."
+                    and is_abbreviation_period(
+                        text,
+                        position,
+                    )
+                ):
+                    search_from = position + 1
+                    continue
+
+                return candidate
+
         def is_inside_direct_quote(
             start,
         ):
@@ -4190,6 +4340,12 @@ def normalize_validated_no_council_action_language(
                 prefix,
             )[-1]
 
+            coordinated_guard_scope = re.split(
+                r"(?:,\s*(?:and\s+)?|\band\s+)",
+                coordinated_prefix,
+                flags=re.I,
+            )[-1]
+
             if (
                 (
                     re.search(
@@ -4212,7 +4368,7 @@ def normalize_validated_no_council_action_language(
                 )
                 and not re.search(
                     r"\b(?:not|never|whether|could|would|should|may|might|can)\b",
-                    coordinated_prefix,
+                    coordinated_guard_scope,
                     re.I,
                 )
             ):
@@ -4247,40 +4403,10 @@ def normalize_validated_no_council_action_language(
             ):
                 continue
 
-            question_sentence_start = max(
-                value.rfind(
-                    ".",
-                    0,
-                    start,
-                ),
-                value.rfind(
-                    "!",
-                    0,
-                    start,
-                ),
-                value.rfind(
-                    "?",
-                    0,
-                    start,
-                ),
-            ) + 1
-
-            question_sentence_end = len(
-                value
+            question_sentence_end = next_sentence_boundary(
+                value,
+                start,
             )
-
-            for punctuation in ".!?":
-                candidate_end = value.find(
-                    punctuation,
-                    start,
-                )
-
-                if (
-                    candidate_end != -1
-                    and candidate_end
-                    < question_sentence_end
-                ):
-                    question_sentence_end = candidate_end
 
             if (
                 question_sentence_end
@@ -4293,28 +4419,14 @@ def normalize_validated_no_council_action_language(
             ):
                 continue
 
-            sentence_start = max(
-                value.rfind(
-                    ".",
-                    0,
+            sentence_start = (
+                previous_sentence_boundary(
+                    value,
                     start,
-                ),
-                value.rfind(
-                    "!",
-                    0,
-                    start,
-                ),
-                value.rfind(
-                    "?",
-                    0,
-                    start,
-                ),
-                value.rfind(
-                    ";",
-                    0,
-                    start,
-                ),
-            ) + 1
+                    include_semicolon=True,
+                )
+                + 1
+            )
 
             passive_prefix = value[
                 sentence_start:start
@@ -4327,6 +4439,8 @@ def normalize_validated_no_council_action_language(
             passive_by = re.match(
                 r"\s+"
                 r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
+                r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
                 r"by\s+(?:the\s+)?"
                 r"(?:"
                 r"(?:[A-Za-z][A-Za-z'-]*\s+){1,4}city\s+council|"
@@ -4352,7 +4466,7 @@ def normalize_validated_no_council_action_language(
             passive_clause_start = sentence_start
 
             if passive_claim:
-                left_boundary = None
+                left_boundary_end = None
 
                 for candidate in re.finditer(
                     r",\s*(?:and|but|while|although|though|whereas)\s+|"
@@ -4365,12 +4479,29 @@ def normalize_validated_no_council_action_language(
                     passive_prefix,
                     re.I,
                 ):
-                    left_boundary = candidate
+                    left_boundary_end = candidate.end()
 
-                if left_boundary:
+                introductory = re.match(
+                    r"\s*(?:after|before|following|despite|although|while|when|"
+                    r"upon|during|with|without|given)\b[^,]{1,120},\s*",
+                    passive_prefix,
+                    re.I,
+                )
+
+                if (
+                    introductory
+                    and (
+                        left_boundary_end is None
+                        or introductory.end()
+                        > left_boundary_end
+                    )
+                ):
+                    left_boundary_end = introductory.end()
+
+                if left_boundary_end is not None:
                     passive_clause_start = (
                         sentence_start
-                        + left_boundary.end()
+                        + left_boundary_end
                     )
 
                 passive_clause_prefix = value[
@@ -4415,7 +4546,7 @@ def normalize_validated_no_council_action_language(
                 start:
             ]
 
-            boundary = next_action_boundary.search(
+            boundary = find_next_action_boundary(
                 tail
             )
 
@@ -4444,6 +4575,7 @@ def normalize_validated_no_council_action_language(
                 r")|"
                 r"\s+(?:because|although|though|whereas)\b|"
                 r",\s*(?:which|who|whom|whose)\b|"
+                r",\s*(?:including|such\s+as)\b|"
                 r"\s+to\s+(?:fund|finance|support|pay|provide|enable|allow|"
                 r"help|build|construct|improve|expand|address|cover)\b",
                 local,
