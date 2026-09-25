@@ -2564,6 +2564,182 @@ def test_no_council_action_guard_preserves_sentence_after_terminal_pm():
     ]
 
 
+
+def test_no_council_action_guard_rejects_passive_named_other_city_council():
+    original = (
+        "The Main Street paving contract was approved by the Irvine "
+        "City Council."
+    )
+
+    story = make_story(
+        body=[
+            original,
+        ]
+    )
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        original,
+    ]
+
+
+def test_no_council_action_guard_accepts_passive_matching_named_city_council():
+    story = make_story(
+        body=[
+            (
+                "The Main Street paving contract was approved by the "
+                "Lake Forest City Council."
+            )
+        ]
+    )
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "The council took no action on "
+            "MAIN STREET PAVING CONTRACT."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_unpunctuated_but_before_passive():
+    story = make_story(
+        body=[
+            (
+                "Residents objected but the Main Street paving contract "
+                "was approved by the council."
+            )
+        ]
+    )
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "Residents objected but the council took no action on "
+            "MAIN STREET PAVING CONTRACT."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_sentence_after_terminal_inc():
+    story = make_story(
+        body=[
+            (
+                "The council approves the Main Street paving contract "
+                "with Acme Inc. Residents cheered."
+            )
+        ]
+    )
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "The council takes no action on MAIN STREET PAVING CONTRACT. "
+            "Residents cheered."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_active_present_tense():
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    cases = (
+        (
+            "The council does approve the Main Street paving contract.",
+            "The council takes no action on MAIN STREET PAVING CONTRACT.",
+        ),
+        (
+            "Council members approve the Main Street paving contract.",
+            "Council members take no action on MAIN STREET PAVING CONTRACT.",
+        ),
+    )
+
+    for original, expected in cases:
+        story = make_story(
+            body=[
+                original,
+            ]
+        )
+
+        assert pc.normalize_validated_no_council_action_language(
+            story,
+            intelligence,
+        )
+
+        assert story.body == [
+            expected,
+        ]
+
+
 def test_no_council_action_guard_leaves_unrelated_receive_language_unchanged():
     original = (
         "The council received a neighborhood traffic update "
