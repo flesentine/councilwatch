@@ -3536,6 +3536,1531 @@ def normalize_validated_warrant_register_name(
 
 
 
+
+
+def normalize_validated_no_council_action_language(
+    story,
+    intelligence,
+):
+    """
+    Remove reader-facing action claims that repeat an editorial
+    disposition already rejected by a validated NO COUNCIL ACTION row.
+
+    This guard is intentionally narrow:
+      - the ledger row must be validated and conflict-free;
+      - it must have an official agenda title;
+      - its editorial topic must itself contain the action verb being
+        claimed in public copy;
+      - the local clause must share at least two meaningful topic cues.
+
+    That lets us correct cases such as a model-generated coverage label
+    "Complete City Fee Study Receive and File" after the source-validated
+    ledger resolves the real agenda item but records no council action,
+    without rewriting ordinary discussion or public-comment language.
+    """
+
+    action_patterns = {
+        "approve": re.compile(
+            r"\bapprove(?:s|d|ing)?\b",
+            re.I,
+        ),
+        "adopt": re.compile(
+            r"\badopt(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "authorize": re.compile(
+            r"\bauthoriz(?:e|es|ed|ing)\b",
+            re.I,
+        ),
+        "award": re.compile(
+            r"\baward(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "direct": re.compile(
+            r"\bdirect(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "reject": re.compile(
+            r"\breject(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "deny": re.compile(
+            r"\b(?:deny|denies|denied|denying)\b",
+            re.I,
+        ),
+        "appoint": re.compile(
+            r"\bappoint(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "accept": re.compile(
+            r"\baccept(?:s|ed|ing)?\b",
+            re.I,
+        ),
+        "pass": re.compile(
+            r"\bpass(?:es|ed|ing)?\b",
+            re.I,
+        ),
+        "certify": re.compile(
+            r"\b(?:certify|certifies|certified|certifying)\b",
+            re.I,
+        ),
+        "ratify": re.compile(
+            r"\b(?:ratify|ratifies|ratified|ratifying)\b",
+            re.I,
+        ),
+        "receive": re.compile(
+            r"\breceiv(?:e|es|ed|ing)\b",
+            re.I,
+        ),
+    }
+
+    generic_words = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "into",
+        "onto",
+        "over",
+        "under",
+        "about",
+        "after",
+        "before",
+        "during",
+        "through",
+        "between",
+        "among",
+        "that",
+        "this",
+        "these",
+        "those",
+        "their",
+        "there",
+        "then",
+        "than",
+        "also",
+        "agenda",
+        "city",
+        "complete",
+        "comprehensive",
+        "council",
+        "item",
+        "items",
+        "meeting",
+        "motion",
+        "public",
+        "report",
+        "reports",
+        "staff",
+        "action",
+        "approve",
+        "approves",
+        "approved",
+        "approving",
+        "adopt",
+        "adopts",
+        "adopted",
+        "adopting",
+        "authorize",
+        "authorizes",
+        "authorized",
+        "authorizing",
+        "award",
+        "awards",
+        "awarded",
+        "awarding",
+        "direct",
+        "directs",
+        "directed",
+        "directing",
+        "reject",
+        "rejects",
+        "rejected",
+        "rejecting",
+        "deny",
+        "denies",
+        "denied",
+        "denying",
+        "appoint",
+        "appoints",
+        "appointed",
+        "appointing",
+        "accept",
+        "accepts",
+        "accepted",
+        "accepting",
+        "pass",
+        "passes",
+        "passed",
+        "passing",
+        "certify",
+        "certifies",
+        "certified",
+        "certifying",
+        "ratify",
+        "ratifies",
+        "ratified",
+        "ratifying",
+        "receive",
+        "receives",
+        "received",
+        "receiving",
+        "file",
+        "files",
+        "filed",
+        "filing",
+    }
+
+    def topic_words(
+        value,
+    ):
+        return {
+            word
+            for word in re.findall(
+                r"[a-z0-9]+",
+                str(
+                    value or ""
+                ).lower(),
+            )
+            if (
+                len(word) >= 3
+                and not word.isdigit()
+                and word
+                not in generic_words
+            )
+        }
+
+    records = []
+
+    for action in intelligence.get(
+        "action_ledger",
+        [],
+    ):
+        if (
+            action.get("validated") is not True
+            or action.get(
+                "agenda_linkage_conflict"
+            )
+            or str(
+                action.get(
+                    "action_status",
+                    "",
+                )
+            ).strip().lower()
+            != "no council action"
+        ):
+            continue
+
+        topic = str(
+            action.get(
+                "topic",
+                "",
+            )
+            or ""
+        ).strip()
+
+        agenda_title = str(
+            action.get(
+                "agenda_title",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if (
+            not topic
+            or not agenda_title
+        ):
+            continue
+
+        roots = {
+            root
+            for root, pattern
+            in action_patterns.items()
+            if pattern.search(
+                topic
+            )
+        }
+
+        if not roots:
+            continue
+
+        cues = topic_words(
+            topic
+            + " "
+            + agenda_title
+        )
+
+        if len(cues) < 2:
+            continue
+
+        records.append(
+            {
+                "roots": roots,
+                "cues": cues,
+                "subject": agenda_title,
+            }
+        )
+
+    if not records:
+        return False
+
+    action_surface = (
+        r"(?:"
+        r"approve|approves|approved|approving|"
+        r"adopt|adopts|adopted|adopting|"
+        r"authorize|authorizes|authorized|authorizing|"
+        r"award|awards|awarded|awarding|"
+        r"direct|directs|directed|directing|"
+        r"reject|rejects|rejected|rejecting|"
+        r"deny|denies|denied|denying|"
+        r"appoint|appoints|appointed|appointing|"
+        r"accept|accepts|accepted|accepting|"
+        r"pass|passes|passed|passing|"
+        r"certify|certifies|certified|certifying|"
+        r"ratify|ratifies|ratified|ratifying|"
+        r"receive|receives|received|receiving"
+        r")"
+    )
+
+    next_action_boundary = re.compile(
+        r"(?="
+        r";|[.!?]|"
+        r"\s+\band\b\s+"
+        r"(?="
+        r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
+        + action_surface
+        + r"\b"
+        r")|"
+        r"\s+\band\b\s+"
+        r"(?="
+        r"(?:"
+        r"(?:is|are|was|were|has|have|had|did|does|"
+        r"can|could|may|might|must|shall|should|will|would)\b|"
+        r"[a-z][a-z'-]*(?:ed|ing)\b(?=\s+[^,;.!?]+)|"
+        r"(?:met|held|left|went|spoke|read|set|put|made|took|gave|heard)\b"
+        r")"
+        r")|"
+        r",\s*"
+        r"(?="
+        r"(?:and\s+|but\s+)?"
+        r"(?:(?:the\s+)?(?:city\s+)?council\s+)?"
+        + action_surface
+        + r"\b"
+        r")|"
+        r",\s*(?=(?:but|while|although|though|whereas)\b)|"
+        r",\s+and\s+"
+        r"(?="
+        r"(?:the\s+)?"
+        r"(?:"
+        r"(?:[a-z][a-z'-]*\s+){0,3}"
+        r"(?:residents?|staff|members?|officials?|speakers?|neighbors?|"
+        r"public|commission|board|developer|applicant)|"
+        r"(?:mayor|councilmember|commissioner)"
+        r"(?:\s+[a-z][a-z'-]*){0,3}"
+        r")\b"
+        r"[^,;.!?]{0,40}\b"
+        r"(?:is|are|was|were|has|have|had|did|does|"
+        r"can|could|may|might|must|shall|should|will|would|"
+        r"[a-z][a-z'-]*(?:ed|ing|s))\b"
+        r")"
+        r")",
+        re.I,
+    )
+
+    def scrub(
+        value,
+        *,
+        headline=False,
+    ):
+        value = str(
+            value or ""
+        )
+
+        matches = []
+
+        for root, pattern in action_patterns.items():
+            for match in pattern.finditer(
+                value
+            ):
+                matches.append(
+                    (
+                        match.start(),
+                        match.end(),
+                        root,
+                        match.group(
+                            0
+                        ),
+                    )
+                )
+
+        if not matches:
+            return value
+
+        cleaned = value
+
+        def is_abbreviation_period(
+            text,
+            position,
+        ):
+            if (
+                position < 0
+                or position >= len(
+                    text
+                )
+                or text[
+                    position
+                ] != "."
+            ):
+                return False
+
+            if position == len(
+                text
+            ) - 1:
+                return False
+
+            before = text[
+                :position + 1
+            ].lower()
+
+            after = text[
+                position + 1:
+                position + 4
+            ].lower()
+
+            if (
+                re.search(
+                    r"\b(?:a|p)\.$",
+                    before,
+                )
+                and after.startswith(
+                    "m."
+                )
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:a|p)\.m\.$",
+                before,
+            ):
+                remainder = text[
+                    position + 1:
+                ]
+                next_nonspace = re.search(
+                    r"\S",
+                    remainder,
+                )
+
+                if (
+                    next_nonspace
+                    and remainder[
+                        next_nonspace.start()
+                    ].isupper()
+                ):
+                    return False
+
+                return True
+
+            generic_abbreviation = re.search(
+                r"\b(?P<abbreviation>"
+                r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+                r"mr|mrs|ms|dr|prof|sr|jr|st|ave|blvd|rd|inc|etc"
+                r")\.$",
+                before,
+            )
+
+            if generic_abbreviation:
+                remainder = text[
+                    position + 1:
+                ]
+                next_nonspace = re.search(
+                    r"\S",
+                    remainder,
+                )
+
+                if (
+                    next_nonspace
+                    and remainder[
+                        next_nonspace.start()
+                    ].isupper()
+                    and generic_abbreviation.group(
+                        "abbreviation"
+                    ).lower()
+                    not in {
+                        "mr",
+                        "mrs",
+                        "ms",
+                        "dr",
+                        "prof",
+                        "st",
+                    }
+                ):
+                    return False
+
+                return True
+
+            return False
+
+        def previous_sentence_boundary(
+            text,
+            position,
+            *,
+            include_semicolon=False,
+        ):
+            punctuation = ".!?"
+            if include_semicolon:
+                punctuation += ";"
+
+            for index in range(
+                position - 1,
+                -1,
+                -1,
+            ):
+                if text[
+                    index
+                ] not in punctuation:
+                    continue
+
+                if (
+                    text[
+                        index
+                    ] == "."
+                    and is_abbreviation_period(
+                        text,
+                        index,
+                    )
+                ):
+                    continue
+
+                return index
+
+            return -1
+
+        def next_sentence_boundary(
+            text,
+            position,
+        ):
+            for index in range(
+                position,
+                len(
+                    text
+                ),
+            ):
+                if text[
+                    index
+                ] not in ".!?":
+                    continue
+
+                if (
+                    text[
+                        index
+                    ] == "."
+                    and is_abbreviation_period(
+                        text,
+                        index,
+                    )
+                ):
+                    continue
+
+                return index
+
+            return len(
+                text
+            )
+
+        def find_next_action_boundary(
+            text,
+        ):
+            search_from = 0
+
+            while True:
+                candidate = next_action_boundary.search(
+                    text,
+                    search_from,
+                )
+
+                if not candidate:
+                    return None
+
+                position = candidate.start()
+
+                if (
+                    position < len(
+                        text
+                    )
+                    and text[
+                        position
+                    ] == "."
+                    and is_abbreviation_period(
+                        text,
+                        position,
+                    )
+                ):
+                    search_from = position + 1
+                    continue
+
+                return candidate
+
+        def is_inside_direct_quote(
+            start,
+        ):
+            before = value[
+                :start
+            ]
+
+            # Straight double quotes use parity.
+            if before.count(
+                '"'
+            ) % 2:
+                return True
+
+            # Curly quotation marks use the most recent opener/closer.
+            if before.rfind(
+                "“"
+            ) > before.rfind(
+                "”"
+            ):
+                return True
+
+            return False
+
+        def is_generated_no_action_context(
+            start,
+        ):
+            for record in records:
+                subject = str(
+                    record.get(
+                        "subject",
+                        "",
+                    )
+                    or ""
+                ).strip()
+
+                if not subject:
+                    continue
+
+                generated_pattern = re.compile(
+                    r"\b(?:takes|took)\s+no\s+action\s+on\s+"
+                    + re.escape(
+                        subject
+                    ),
+                    re.I,
+                )
+
+                for generated in generated_pattern.finditer(
+                    cleaned
+                ):
+                    subject_start = (
+                        generated.end()
+                        - len(
+                            subject
+                        )
+                    )
+
+                    if (
+                        subject_start
+                        <= start
+                        < generated.end()
+                    ):
+                        return True
+
+            return False
+
+        def is_noncurrent_or_nonassertive_context(
+            prefix,
+        ):
+            clause_prefix = re.split(
+                r"[.!?]",
+                prefix,
+            )[-1]
+
+            history_scope = re.sub(
+                r"^\s*(?:unlike|compared\s+(?:with|to)|"
+                r"in\s+contrast\s+(?:with|to))\s+[^,]+,\s*",
+                "",
+                clause_prefix,
+                flags=re.I,
+            )
+
+            if (
+                re.search(
+                    r"\b(?:in|during|since|from)\s+(?:19|20)\d{2}\b",
+                    history_scope,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:previously|"
+                    r"earlier\s+(?:"
+                    r"(?:this|last|prior|previous)\s+)?"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+in\s+(?:the|that)\s+"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+meeting|"
+                    r"last\s+year|years?\s+ago|"
+                    r"(?:prior|previous)\s+meeting)\b",
+                    history_scope,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:on|at)\s+"
+                    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+                    r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+"
+                    r"\d{1,2}(?:,\s*(?:19|20)\d{2})?\b",
+                    history_scope,
+                    re.I,
+                )
+            ):
+                return True
+
+            conditional_scope = re.split(
+                r",\s*",
+                clause_prefix,
+            )[-1]
+
+            if re.search(
+                r"\b(?:if|unless|assuming|provided\s+that)\b",
+                conditional_scope,
+                re.I,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:recommend(?:ed|s)?|suggest(?:ed|s)?|"
+                r"propos(?:ed|es)|request(?:ed|s)?|ask(?:ed|s)?|"
+                r"urge(?:d|s)?)\b"
+                r"[^.!?;]{0,120}\b(?:that\s+)?"
+                r"(?:the\s+)?(?:city\s+)?council"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:denied?|disputed?|refuted?|contested?)\b"
+                r"[^.!?;]{0,120}\bthat\s+"
+                r"(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ) or re.search(
+                r"\b(?:did|does|do)\s+not\s+"
+                r"(?:say|state|confirm|report|claim|assert)\b"
+                r"[^.!?;]{0,120}\bthat\s+"
+                r"(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ):
+                return True
+
+            if re.search(
+                r"\b(?:do|does|did|could|would|should|may|might|can|will|"
+                r"has|have|had|is|are|was|were)\s+"
+                r"(?:the\s+)?(?:city\s+)?council"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                clause_prefix,
+                re.I,
+            ):
+                return True
+
+            return False
+
+        def affirmative_replacement_start(
+            start,
+            observed,
+        ):
+            prefix_start = max(
+                0,
+                start - 160,
+            )
+
+            prefix = cleaned[
+                prefix_start:start
+            ]
+
+            if is_noncurrent_or_nonassertive_context(
+                prefix
+            ):
+                return None
+
+            named_city_council = re.search(
+                r"\b(?P<name>(?:[A-Z][A-Za-z'-]*\s+){1,4})"
+                r"City\s+Council(?:\s+Members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                prefix,
+            )
+
+            if named_city_council:
+                named_city = " ".join(
+                    named_city_council.group(
+                        "name"
+                    ).split()
+                )
+
+                if named_city.lower().startswith(
+                    "the "
+                ):
+                    named_city = named_city[
+                        4:
+                    ]
+
+                meeting_city = " ".join(
+                    str(
+                        intelligence.get(
+                            "city_name",
+                            "",
+                        )
+                        or ""
+                    ).split()
+                )
+
+                if (
+                    not meeting_city
+                    or named_city.lower()
+                    != meeting_city.lower()
+                ):
+                    return None
+
+            # Do not apply this city's action ledger to another
+            # governing body merely because its name ends in "council".
+            qualified_council = re.search(
+                r"\b(?P<qualifier>[a-z][a-z'-]+)\s+"
+                r"council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                prefix,
+                re.I,
+            )
+
+            if (
+                qualified_council
+                and qualified_council.group(
+                    "qualifier"
+                ).lower()
+                not in {
+                    "the",
+                    "city",
+                }
+            ):
+                return None
+
+            # A bare Council-subject gerund is not a finite action
+            # assertion:
+            #   "The council adopting X would ..."
+            #   "the possibility of the council adopting X ..."
+            if str(
+                observed or ""
+            ).lower().endswith(
+                "ing"
+            ):
+                return None
+
+            # Accurate negative or hypothetical language must survive:
+            #   "did not approve ..."
+            #   "whether to approve ..."
+            #   "could approve ..."
+            if re.search(
+                r"\b(?:not|never)\s+$",
+                prefix,
+                re.I,
+            ):
+                return None
+
+            if re.search(
+                r"\bwhether(?:\s+the\s+council)?(?:\s+\w+){0,3}\s+to\s+$",
+                prefix,
+                re.I,
+            ):
+                return None
+
+            if re.search(
+                r"\b(?:could|would|should|may|might|can)\s+$",
+                prefix,
+                re.I,
+            ):
+                return None
+
+            if re.search(
+                r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))?"
+                r"\s+$",
+                prefix,
+                re.I,
+            ):
+                return start
+
+            # Reader-facing copy can use a finite auxiliary or
+            # a completed vote-to construction. Replace the whole
+            # predicate rather than leaving a dangling helper phrase.
+            auxiliary = re.search(
+                r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?\s+"
+                r"(?P<predicate>"
+                r"(?:did|does)\s+|"
+                r"(?:has|had)\s+"
+                r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*|"
+                r"(?:votes?|voted)\s+"
+                r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                r"to\s+"
+                r")$",
+                prefix,
+                re.I,
+            )
+
+            if auxiliary:
+                return (
+                    prefix_start
+                    + auxiliary.start(
+                        "predicate"
+                    )
+                )
+
+            # Headlines also commonly use future-style auxiliary
+            # wording.
+            if headline:
+                headline_auxiliary = re.search(
+                    r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?\s+"
+                    r"(?P<predicate>"
+                    r"will\s+"
+                    r")$",
+                    prefix,
+                    re.I,
+                )
+
+                if headline_auxiliary:
+                    return (
+                        prefix_start
+                        + headline_auxiliary.start(
+                            "predicate"
+                        )
+                    )
+
+            # Coordinated verbs can inherit the same explicit Council
+            # subject:
+            #   "The council adopted X, passed Y, and received Z."
+            coordinated_prefix = re.split(
+                r"[.!?;]",
+                prefix,
+            )[-1]
+
+            coordinated_guard_scope = re.split(
+                r"(?:,\s*(?:and\s+)?|\band\s+)",
+                coordinated_prefix,
+                flags=re.I,
+            )[-1]
+
+            if (
+                (
+                    re.search(
+                        r"(?:^|[,;]\s*)"
+                        r"(?:[Tt]he\s+)?(?:[Cc]ity\s+)?[Cc]ouncil"
+                        r"(?:\s+[Mm]embers)?\b",
+                        coordinated_prefix,
+                    )
+                    or re.search(
+                        r"(?:^|[,;]\s*)"
+                        r"(?:[A-Z][A-Za-z'-]*\s+){1,4}"
+                        r"[Cc]ity\s+[Cc]ouncil\b",
+                        coordinated_prefix,
+                    )
+                )
+                and re.search(
+                    r"(?:,\s*(?:and\s+)?|\band\s+)$",
+                    coordinated_prefix,
+                    re.I,
+                )
+                and not re.search(
+                    r"\b(?:not|never|whether|could|would|should|may|might|can)\b",
+                    coordinated_guard_scope,
+                    re.I,
+                )
+            ):
+                return start
+
+            return None
+
+        # Right-to-left replacement preserves the start offsets of
+        # earlier action claims.
+        for (
+            start,
+            end,
+            root,
+            observed,
+        ) in sorted(
+            matches,
+            key=lambda item: item[0],
+            reverse=True,
+        ):
+            if start >= len(
+                cleaned
+            ):
+                continue
+
+            if is_generated_no_action_context(
+                start
+            ):
+                continue
+
+            if is_inside_direct_quote(
+                start
+            ):
+                continue
+
+            question_sentence_end = next_sentence_boundary(
+                value,
+                start,
+            )
+
+            if (
+                question_sentence_end
+                < len(
+                    value
+                )
+                and value[
+                    question_sentence_end
+                ] == "?"
+            ):
+                continue
+
+            sentence_start = (
+                previous_sentence_boundary(
+                    value,
+                    start,
+                    include_semicolon=True,
+                )
+                + 1
+            )
+
+            passive_prefix = value[
+                sentence_start:start
+            ]
+
+            passive_suffix = value[
+                end:
+            ]
+
+            passive_by = re.match(
+                r"\s+"
+                r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
+                r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                r"by\s+(?:the\s+)?"
+                r"(?:"
+                r"(?P<named_city>(?:[A-Za-z][A-Za-z'-]*\s+){1,4})"
+                r"city\s+council|"
+                r"(?:city\s+)?council"
+                r")\b",
+                passive_suffix,
+                re.I,
+            )
+
+            if (
+                passive_by
+                and passive_by.group(
+                    "named_city"
+                )
+            ):
+                passive_city = " ".join(
+                    passive_by.group(
+                        "named_city"
+                    ).split()
+                )
+
+                meeting_city = " ".join(
+                    str(
+                        intelligence.get(
+                            "city_name",
+                            "",
+                        )
+                        or ""
+                    ).split()
+                )
+
+                if (
+                    meeting_city
+                    and passive_city.lower()
+                    != meeting_city.lower()
+                ):
+                    passive_by = None
+
+            passive_auxiliary = re.search(
+                r"\b(?P<auxiliary>"
+                r"was|were|is|are|has\s+been|have\s+been|had\s+been"
+                r")\s+$",
+                passive_prefix,
+                re.I,
+            )
+
+            passive_claim = bool(
+                passive_by
+                and passive_auxiliary
+            )
+
+            passive_clause_start = sentence_start
+
+            if passive_claim:
+                left_boundary_end = None
+
+                for candidate in re.finditer(
+                    r",\s*(?:and|but|while|although|though|whereas)\s+|"
+                    r";\s*|"
+                    r"\b(?:and|but)\s+(?="
+                    r"[^,;.!?]{1,160}\b"
+                    r"(?:was|were|is|are|has\s+been|have\s+been|had\s+been)"
+                    r"\s+$"
+                    r")",
+                    passive_prefix,
+                    re.I,
+                ):
+                    left_boundary_end = candidate.end()
+
+                introductory = re.match(
+                    r"\s*(?:after|before|following|despite|although|while|when|"
+                    r"upon|during|with|without|given)\b[^,]{1,120},\s*",
+                    passive_prefix,
+                    re.I,
+                )
+
+                if (
+                    introductory
+                    and (
+                        left_boundary_end is None
+                        or introductory.end()
+                        > left_boundary_end
+                    )
+                ):
+                    left_boundary_end = introductory.end()
+
+                if left_boundary_end is not None:
+                    passive_clause_start = (
+                        sentence_start
+                        + left_boundary_end
+                    )
+
+                passive_clause_prefix = value[
+                    passive_clause_start:start
+                ]
+
+                if is_noncurrent_or_nonassertive_context(
+                    passive_clause_prefix
+                ):
+                    passive_claim = False
+
+            if passive_claim:
+                leading = re.match(
+                    r"\s*",
+                    value[
+                        passive_clause_start:
+                    ],
+                )
+                replacement_start = (
+                    passive_clause_start
+                    + len(
+                        leading.group(
+                            0
+                        )
+                    )
+                )
+            else:
+                replacement_start = (
+                    affirmative_replacement_start(
+                        start,
+                        observed,
+                    )
+                )
+
+            if replacement_start is None:
+                continue
+
+            # Compute clause boundaries and topic cues from the
+            # immutable original value. Later right-to-left rewrites
+            # must not erase the next action boundary.
+            tail = value[
+                start:
+            ]
+
+            boundary = find_next_action_boundary(
+                tail
+            )
+
+            local_end = (
+                start
+                + boundary.start()
+                if boundary
+                else len(
+                    value
+                )
+            )
+
+            local = value[
+                start:local_end
+            ]
+
+            # Bind topic cues to the action's object, not to a later
+            # subordinate explanation or discussion.
+            subordinate = re.search(
+                r"\s+(?:after|before|while|when)\s+"
+                r"(?:"
+                r"(?:the|staff|members?|officials?)\b|"
+                r"(?:a|an)\s+(?:discussion|presentation|hearing|review)\b|"
+                r"(?:discussing|considering|reviewing|hearing|receiving|"
+                r"noting|learning|presenting)\b"
+                r")|"
+                r"\s+(?:because|although|though|whereas)\b|"
+                r",\s*(?:which|who|whom|whose)\b|"
+                r",\s*(?:including|such\s+as)\b|"
+                r"\s+to\s+(?:fund|finance|support|pay|provide|enable|allow|"
+                r"help|build|construct|improve|expand|address|cover)\b",
+                local,
+                re.I,
+            )
+
+            governed_local = (
+                local[:subordinate.start()]
+                if subordinate
+                else local
+            )
+
+            if passive_claim:
+                governed_local = (
+                    value[
+                        replacement_start:start
+                    ]
+                    + " "
+                    + governed_local
+                )
+
+            if (
+                re.search(
+                    r"\b(?:in|during|since|from)\s+(?:19|20)\d{2}\b",
+                    governed_local,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:previously|"
+                    r"earlier\s+(?:"
+                    r"(?:this|last|prior|previous)\s+)?"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+in\s+(?:the|that)\s+"
+                    r"(?:year|month|week|session)|"
+                    r"earlier\s+meeting|"
+                    r"last\s+year|years?\s+ago|"
+                    r"(?:prior|previous)\s+meeting)\b",
+                    governed_local,
+                    re.I,
+                )
+                or re.search(
+                    r"\b(?:on|at)\s+"
+                    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|"
+                    r"may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+                    r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+"
+                    r"\d{1,2}(?:,\s*(?:19|20)\d{2})?\b",
+                    governed_local,
+                    re.I,
+                )
+            ):
+                continue
+
+            local_cues = topic_words(
+                governed_local
+            )
+
+            candidates = []
+
+            for record in records:
+                if root not in record[
+                    "roots"
+                ]:
+                    continue
+
+                score = len(
+                    local_cues
+                    & record[
+                        "cues"
+                    ]
+                )
+
+                if score < 2:
+                    continue
+
+                candidates.append(
+                    (
+                        score,
+                        record,
+                    )
+                )
+
+            if not candidates:
+                continue
+
+            best_score = max(
+                score
+                for score, _
+                in candidates
+            )
+
+            best_by_subject = {}
+
+            for score, record in candidates:
+                if score != best_score:
+                    continue
+
+                subject_key = str(
+                    record.get(
+                        "subject",
+                        "",
+                    )
+                    or ""
+                ).strip().casefold()
+
+                if subject_key:
+                    best_by_subject[
+                        subject_key
+                    ] = record
+
+            if len(
+                best_by_subject
+            ) != 1:
+                continue
+
+            best = next(
+                iter(
+                    best_by_subject.values()
+                )
+            )
+
+            subject = best[
+                "subject"
+            ]
+
+            if headline:
+                replacement = (
+                    (
+                        "Council Takes No Action on "
+                        if passive_claim
+                        else "Takes No Action on "
+                    )
+                    + subject
+                )
+            else:
+                active_prefix = value[
+                    max(
+                        0,
+                        start - 160,
+                    ):
+                    start
+                ]
+
+                active_present = bool(
+                    re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+does\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+votes?\s+"
+                        r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                        r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                        r"to\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or (
+                        observed.lower() == root
+                        and re.search(
+                            r"\b(?:the\s+)?(?:city\s+)?council\s+members"
+                            r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                            r"\s+$",
+                            active_prefix,
+                            re.I,
+                        )
+                    )
+                    or observed.lower().endswith(
+                        "s"
+                    )
+                )
+
+                active_past = bool(
+                    re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+did\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+(?:has|had)\s+"
+                        r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+voted\s+"
+                        r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                        r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                        r"to\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                )
+
+                present_like = (
+                    passive_claim
+                    and passive_auxiliary
+                    and passive_auxiliary.group(
+                        "auxiliary"
+                    ).lower() in {
+                        "is",
+                        "are",
+                        "has been",
+                        "have been",
+                    }
+                ) or (
+                    not passive_claim
+                    and active_present
+                    and not active_past
+                )
+
+                plural_active_subject = bool(
+                    not passive_claim
+                    and re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council\s+members"
+                        r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                        r"\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                )
+
+                replacement = (
+                    (
+                        (
+                            "take no action on "
+                            if plural_active_subject
+                            else "takes no action on "
+                        )
+                        if present_like
+                        else "took no action on "
+                    )
+                    + subject
+                )
+
+                if passive_claim:
+                    sentence_initial = (
+                        replacement_start
+                        <= sentence_start
+                        + len(
+                            value[
+                                sentence_start:
+                                replacement_start
+                            ]
+                        )
+                    )
+
+                    replacement = (
+                        (
+                            "The council "
+                            if replacement_start
+                            == sentence_start
+                            + len(
+                                re.match(
+                                    r"\s*",
+                                    value[
+                                        sentence_start:
+                                    ],
+                                ).group(
+                                    0
+                                )
+                            )
+                            else "the council "
+                        )
+                        + replacement
+                    )
+                elif (
+                    observed
+                    and observed[0].isupper()
+                ):
+                    replacement = (
+                        replacement[0].upper()
+                        + replacement[1:]
+                    )
+
+            cleaned = (
+                cleaned[:replacement_start]
+                + replacement
+                + cleaned[
+                    local_end:
+                ]
+            )
+
+        return cleaned
+
+    changed = False
+
+    for field in (
+        "headline",
+        "dek",
+    ):
+        old = str(
+            getattr(
+                story,
+                field,
+                "",
+            )
+            or ""
+        )
+
+        new = scrub(
+            old,
+            headline=(
+                field == "headline"
+            ),
+        )
+
+        if new != old:
+            setattr(
+                story,
+                field,
+                new,
+            )
+            changed = True
+
+    new_body = [
+        scrub(
+            paragraph
+        )
+        for paragraph in story.body
+    ]
+
+    if new_body != story.body:
+        story.body = new_body
+        changed = True
+
+    new_key_facts = [
+        scrub(
+            fact
+        )
+        for fact in story.key_facts
+    ]
+
+    if new_key_facts != story.key_facts:
+        story.key_facts = new_key_facts
+        changed = True
+
+    return changed
+
+
 def normalize_validated_action_language(
     story,
     intelligence,
@@ -3557,6 +5082,12 @@ def normalize_validated_action_language(
         changed = True
 
     if normalize_validated_formal_status_language(
+        story,
+        intelligence,
+    ):
+        changed = True
+
+    if normalize_validated_no_council_action_language(
         story,
         intelligence,
     ):
@@ -5337,6 +6868,15 @@ def process_city(
                 ),
                 encoding="utf-8",
             )
+
+        intelligence.setdefault(
+            "city_name",
+            city,
+        )
+        intelligence.setdefault(
+            "city_slug",
+            slug,
+        )
 
         print()
         print("Coverage plan:")
