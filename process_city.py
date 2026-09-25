@@ -3962,11 +3962,42 @@ def normalize_validated_no_council_action_language(
 
                 return True
 
-            if re.search(
-                r"\b(?:jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
-                r"mr|mrs|ms|dr|prof|sr|jr|st|ave|blvd|rd|inc|etc)\.$",
+            generic_abbreviation = re.search(
+                r"\b(?P<abbreviation>"
+                r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+                r"mr|mrs|ms|dr|prof|sr|jr|st|ave|blvd|rd|inc|etc"
+                r")\.$",
                 before,
-            ):
+            )
+
+            if generic_abbreviation:
+                remainder = text[
+                    position + 1:
+                ]
+                next_nonspace = re.search(
+                    r"\S",
+                    remainder,
+                )
+
+                if (
+                    next_nonspace
+                    and remainder[
+                        next_nonspace.start()
+                    ].isupper()
+                    and generic_abbreviation.group(
+                        "abbreviation"
+                    ).lower()
+                    not in {
+                        "mr",
+                        "mrs",
+                        "ms",
+                        "dr",
+                        "prof",
+                        "st",
+                    }
+                ):
+                    return False
+
                 return True
 
             return False
@@ -4523,12 +4554,42 @@ def normalize_validated_no_council_action_language(
                 r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
                 r"by\s+(?:the\s+)?"
                 r"(?:"
-                r"(?:[A-Za-z][A-Za-z'-]*\s+){1,4}city\s+council|"
+                r"(?P<named_city>(?:[A-Za-z][A-Za-z'-]*\s+){1,4})"
+                r"city\s+council|"
                 r"(?:city\s+)?council"
                 r")\b",
                 passive_suffix,
                 re.I,
             )
+
+            if (
+                passive_by
+                and passive_by.group(
+                    "named_city"
+                )
+            ):
+                passive_city = " ".join(
+                    passive_by.group(
+                        "named_city"
+                    ).split()
+                )
+
+                meeting_city = " ".join(
+                    str(
+                        intelligence.get(
+                            "city_name",
+                            "",
+                        )
+                        or ""
+                    ).split()
+                )
+
+                if (
+                    not meeting_city
+                    or passive_city.lower()
+                    != meeting_city.lower()
+                ):
+                    passive_by = None
 
             passive_auxiliary = re.search(
                 r"\b(?P<auxiliary>"
@@ -4551,7 +4612,7 @@ def normalize_validated_no_council_action_language(
                 for candidate in re.finditer(
                     r",\s*(?:and|but|while|although|though|whereas)\s+|"
                     r";\s*|"
-                    r"\band\s+(?="
+                    r"\b(?:and|but)\s+(?="
                     r"[^,;.!?]{1,160}\b"
                     r"(?:was|were|is|are|has\s+been|have\s+been|had\s+been)"
                     r"\s+$"
@@ -4790,6 +4851,77 @@ def normalize_validated_no_council_action_language(
                     + subject
                 )
             else:
+                active_prefix = value[
+                    max(
+                        0,
+                        start - 160,
+                    ):
+                    start
+                ]
+
+                active_present = bool(
+                    re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+does\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+has\s+"
+                        r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+votes?\s+"
+                        r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                        r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                        r"to\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or (
+                        observed.lower() == root
+                        and re.search(
+                            r"\b(?:the\s+)?(?:city\s+)?council\s+members"
+                            r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                            r"\s+$",
+                            active_prefix,
+                            re.I,
+                        )
+                    )
+                    or observed.lower().endswith(
+                        "s"
+                    )
+                )
+
+                active_past = bool(
+                    re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+did\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+had\s+"
+                        r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*$",
+                        active_prefix,
+                        re.I,
+                    )
+                    or re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council"
+                        r"(?:\s+members)?\s+voted\s+"
+                        r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
+                        r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
+                        r"to\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                )
+
                 present_like = (
                     passive_claim
                     and passive_auxiliary
@@ -4803,9 +4935,8 @@ def normalize_validated_no_council_action_language(
                     }
                 ) or (
                     not passive_claim
-                    and observed.lower().endswith(
-                        "s"
-                    )
+                    and active_present
+                    and not active_past
                 )
 
                 replacement = (
