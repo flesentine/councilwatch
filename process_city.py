@@ -4585,8 +4585,8 @@ def normalize_validated_no_council_action_language(
                 )
 
                 if (
-                    not meeting_city
-                    or passive_city.lower()
+                    meeting_city
+                    and passive_city.lower()
                     != meeting_city.lower()
                 ):
                     passive_by = None
@@ -4868,13 +4868,6 @@ def normalize_validated_no_council_action_language(
                     )
                     or re.search(
                         r"\b(?:the\s+)?(?:city\s+)?council"
-                        r"(?:\s+members)?\s+has\s+"
-                        r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*$",
-                        active_prefix,
-                        re.I,
-                    )
-                    or re.search(
-                        r"\b(?:the\s+)?(?:city\s+)?council"
                         r"(?:\s+members)?\s+votes?\s+"
                         r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
                         r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
@@ -4906,7 +4899,7 @@ def normalize_validated_no_council_action_language(
                     )
                     or re.search(
                         r"\b(?:the\s+)?(?:city\s+)?council"
-                        r"(?:\s+members)?\s+had\s+"
+                        r"(?:\s+members)?\s+(?:has|had)\s+"
                         r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*$",
                         active_prefix,
                         re.I,
@@ -4939,9 +4932,24 @@ def normalize_validated_no_council_action_language(
                     and not active_past
                 )
 
+                plural_active_subject = bool(
+                    not passive_claim
+                    and re.search(
+                        r"\b(?:the\s+)?(?:city\s+)?council\s+members"
+                        r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                        r"\s+$",
+                        active_prefix,
+                        re.I,
+                    )
+                )
+
                 replacement = (
                     (
-                        "takes no action on "
+                        (
+                            "take no action on "
+                            if plural_active_subject
+                            else "takes no action on "
+                        )
                         if present_like
                         else "took no action on "
                     )
