@@ -3915,6 +3915,11 @@ def normalize_validated_no_council_action_language(
             ):
                 return False
 
+            if position == len(
+                text
+            ) - 1:
+                return False
+
             before = text[
                 :position + 1
             ].lower()
