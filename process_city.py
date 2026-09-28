@@ -4296,6 +4296,7 @@ def normalize_validated_no_council_action_language(
                 r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
                 r"\s+$",
                 prefix,
+                re.I,
             )
 
             if named_city_council:
@@ -4375,6 +4376,17 @@ def normalize_validated_no_council_action_language(
                 return None
 
             if re.search(
+                r"\bwhether\b"
+                r"[^.!?;]{0,120}"
+                r"\b(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
+                r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
+                r"\s+$",
+                prefix,
+                re.I,
+            ):
+                return None
+
+            if re.search(
                 r"\bwhether(?:\s+the\s+council)?(?:\s+\w+){0,3}\s+to\s+$",
                 prefix,
                 re.I,
@@ -4407,6 +4419,7 @@ def normalize_validated_no_council_action_language(
                 r"(?:has|had)\s+"
                 r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*|"
                 r"(?:votes?|voted)\s+"
+                r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
                 r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
                 r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
                 r"to\s+"
@@ -4869,6 +4882,7 @@ def normalize_validated_no_council_action_language(
                     or re.search(
                         r"\b(?:the\s+)?(?:city\s+)?council"
                         r"(?:\s+members)?\s+votes?\s+"
+                        r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
                         r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
                         r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
                         r"to\s+$",
@@ -4907,6 +4921,7 @@ def normalize_validated_no_council_action_language(
                     or re.search(
                         r"\b(?:the\s+)?(?:city\s+)?council"
                         r"(?:\s+members)?\s+voted\s+"
+                        r"(?:(?:also|then|later|ultimately|formally|unanimously)\s+)*"
                         r"(?:(?:\d+\s*[-\u2013\u2014]\s*\d+"
                         r"(?:\s*[-\u2013\u2014]\s*\d+)?)\s+)?"
                         r"to\s+$",
