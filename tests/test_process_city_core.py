@@ -2826,6 +2826,119 @@ def test_no_council_action_guard_handles_adverbial_completed_vote_to():
     ]
 
 
+
+def test_no_council_action_guard_rewrites_shared_object_coordinated_actions():
+    story = make_story(
+        body=[
+            (
+                "The council approved and adopted the Main Street "
+                "paving contract."
+            )
+        ]
+    )
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve Adopt",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+
+    assert story.body == [
+        (
+            "The council took no action on "
+            "MAIN STREET PAVING CONTRACT."
+        )
+    ]
+
+
+def test_no_council_action_guard_preserves_perfect_negated_reporting():
+    original = (
+        "Officials have not confirmed that the council approved the "
+        "Main Street paving contract."
+    )
+
+    story = make_story(body=[original])
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+    assert story.body == [original]
+
+
+def test_no_council_action_guard_preserves_modal_perfect_passive():
+    original = (
+        "The Main Street paving contract may have been approved by "
+        "the council."
+    )
+
+    story = make_story(body=[original])
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+    assert story.body == [original]
+
+
+def test_no_council_action_guard_stops_cues_before_attribution_adjunct():
+    original = (
+        "The council approved the annual budget, according to a report "
+        "about the Main Street paving contract."
+    )
+
+    story = make_story(body=[original])
+
+    intelligence = {
+        "city_name": "Lake Forest",
+        "action_ledger": [
+            action(
+                "Main Street Paving Contract Approve",
+                "no council action",
+                agenda_title="MAIN STREET PAVING CONTRACT",
+            ),
+        ],
+    }
+
+    assert not pc.normalize_validated_no_council_action_language(
+        story,
+        intelligence,
+    )
+    assert story.body == [original]
+
+
 def test_no_council_action_guard_leaves_unrelated_receive_language_unchanged():
     original = (
         "The council received a neighborhood traffic update "
