@@ -4248,8 +4248,9 @@ def normalize_validated_no_council_action_language(
                 clause_prefix,
                 re.I,
             ) or re.search(
-                r"\b(?:did|does|do)\s+not\s+"
-                r"(?:say|state|confirm|report|claim|assert)\b"
+                r"\b(?:did|does|do|has|have|had)\s+not\s+"
+                r"(?:say|state|confirm|report|claim|assert|"
+                r"said|stated|confirmed|reported|claimed|asserted)\b"
                 r"[^.!?;]{0,120}\bthat\s+"
                 r"(?:the\s+)?(?:city\s+)?council(?:\s+members)?"
                 r"(?:\s+(?:also|then|later|ultimately|formally|unanimously))*"
@@ -4496,6 +4497,27 @@ def normalize_validated_no_council_action_language(
                     re.I,
                 )
             ):
+                shared_object = re.search(
+                    r"(?P<first>"
+                    + action_surface
+                    + r")\s+and\s+$",
+                    coordinated_prefix,
+                    re.I,
+                )
+
+                if shared_object:
+                    return (
+                        prefix_start
+                        + re.split(
+                            r"[.!?;]",
+                            prefix,
+                        )[-1].rfind(
+                            shared_object.group(
+                                "first"
+                            )
+                        )
+                    )
+
                 return start
 
             return None
@@ -4612,9 +4634,26 @@ def normalize_validated_no_council_action_language(
                 re.I,
             )
 
+            modal_perfect_passive = False
+
+            if passive_auxiliary:
+                passive_before_auxiliary = passive_prefix[
+                    :passive_auxiliary.start()
+                ]
+
+                modal_perfect_passive = bool(
+                    re.search(
+                        r"\b(?:can|could|may|might|must|shall|should|will|would)"
+                        r"\s+$",
+                        passive_before_auxiliary,
+                        re.I,
+                    )
+                )
+
             passive_claim = bool(
                 passive_by
                 and passive_auxiliary
+                and not modal_perfect_passive
             )
 
             passive_clause_start = sentence_start
@@ -4730,6 +4769,7 @@ def normalize_validated_no_council_action_language(
                 r"\s+(?:because|although|though|whereas)\b|"
                 r",\s*(?:which|who|whom|whose)\b|"
                 r",\s*(?:including|such\s+as)\b|"
+                r",\s*(?:according\s+to|per|as\s+(?:reported|noted|stated)\s+by)\b|"
                 r"\s+to\s+(?:fund|finance|support|pay|provide|enable|allow|"
                 r"help|build|construct|improve|expand|address|cover)\b",
                 local,
