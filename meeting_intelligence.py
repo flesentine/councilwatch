@@ -185,7 +185,7 @@ def _coverage_topic_from_summary(
             re.I,
         ),
         re.compile(
-            r"\brequested\s+(?:a|an|the)?\s*"
+            r"\brequested\s+(?:(?:an|a|the)\s+)?"
             r"(?P<label>.+?)"
             r"(?=,\s+(?:citing|because|with|which|and)\b|[.;]|$)",
             re.I,
@@ -302,19 +302,6 @@ def coverage_topic_label(item):
     if fallback:
         return fallback
 
-    category = str(
-        _coverage_item_value(
-            item,
-            "category",
-        )
-        or ""
-    ).strip()
-
-    if not _coverage_topic_is_bad(
-        category
-    ):
-        return category
-
     return "Coverage Topic Needs Review"
 
 
@@ -367,22 +354,6 @@ def _repair_coverage_plan_topic_labels(
                 ),
             )
         )
-
-        if _coverage_topic_is_bad(
-            fallback
-        ):
-            category = str(
-                _coverage_item_value(
-                    item,
-                    "category",
-                )
-                or ""
-            ).strip()
-
-            if not _coverage_topic_is_bad(
-                category
-            ):
-                fallback = category
 
         if _coverage_topic_is_bad(
             fallback
