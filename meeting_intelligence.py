@@ -411,35 +411,48 @@ def coverage_plan_label_issues(
             or ""
         ).strip()
 
-        label = (
-            display
-            or topic
-        )
+        invalid_labels = []
 
-        if not _coverage_topic_is_bad(
-            label
+        if _coverage_topic_is_bad(
+            topic
         ):
+            invalid_labels.append(
+                topic
+                or "(blank coverage topic)"
+            )
+
+        if (
+            display
+            and _coverage_topic_is_bad(
+                display
+            )
+        ):
+            invalid_labels.append(
+                display
+            )
+
+        if not invalid_labels:
             continue
 
-        issues.append(
-            AuditIssue(
-                severity="material",
-                field="coverage_plan",
-                draft_text=(
-                    label
-                    or "(blank coverage topic)"
-                ),
-                source_evidence=(
-                    "Coverage-plan topic labels must identify a "
-                    "substantive meeting topic and must not contain "
-                    "prompt/meta instructions or generic placeholders."
-                ),
-                correction=(
-                    "Replace the coverage-plan label with a concise, "
-                    "source-derived topic name or official agenda title."
-                ),
+        for label in dict.fromkeys(
+            invalid_labels
+        ):
+            issues.append(
+                AuditIssue(
+                    severity="material",
+                    field="coverage_plan",
+                    draft_text=label,
+                    source_evidence=(
+                        "Coverage-plan topic labels must identify a "
+                        "substantive meeting topic and must not contain "
+                        "prompt/meta instructions or generic placeholders."
+                    ),
+                    correction=(
+                        "Replace the coverage-plan label with a concise, "
+                        "source-derived topic name or official agenda title."
+                    ),
+                )
             )
-        )
 
     return issues
 
