@@ -1205,6 +1205,35 @@ def test_coverage_topic_guard_flags_unrepairable_meta_label():
 
 
 
+def test_coverage_topic_guard_validates_raw_topic_even_with_valid_display():
+    item = {
+        "rank": 3,
+        "topic": "when prompted",
+        "display_topic": "Remote Telephone Access Concerns",
+        "score": 5,
+        "category": "Public Comment",
+        "action_status": "Public Comment",
+        "summary": (
+            "Residents voiced concerns during public comment regarding "
+            "remote telephone access failures."
+        ),
+        "why_it_matters": "Public access matters.",
+        "must_include": True,
+    }
+
+    assert coverage_topic_label(
+        item
+    ) == "Remote Telephone Access Concerns"
+
+    issues = coverage_plan_label_issues(
+        [item]
+    )
+
+    assert len(issues) == 1
+    assert issues[0].field == "coverage_plan"
+    assert issues[0].draft_text == "when prompted"
+
+
 @pytest.mark.parametrize(
     ("summary", "expected"),
     [
