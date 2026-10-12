@@ -33,6 +33,11 @@ from meeting_intelligence import (
     _formal_action_record_supported,
     _formal_status_supported,
     _guard_coverage_plan_money_values,
+    _coverage_topic_is_bad,
+    _coverage_topic_from_summary,
+    _repair_coverage_plan_topic_labels,
+    coverage_plan_label_issues,
+    coverage_topic_label,
     _local_topic_anchor_supported,
     _nonformal_source_supported,
     _quote_is_in_source,
@@ -1109,6 +1114,114 @@ def test_coverage_reconciliation_leaves_unmatched_topic_unchanged():
     )
 
     assert items[0] == original
+
+
+
+def test_coverage_topic_guard_repairs_prompt_residue_from_summary():
+    items = [
+        {
+            "rank": 3,
+            "topic": "when prompted.",
+            "score": 5,
+            "category": "Public Comment",
+            "action_status": "Public Comment",
+            "summary": (
+                "Residents voiced concerns during public comment regarding "
+                "remote telephone access failures during the September 17, "
+                "2026 special meeting, alleging speakers were excluded."
+            ),
+            "why_it_matters": "Remote access affects public participation.",
+            "must_include": True,
+        },
+        {
+            "rank": 5,
+            "topic": "if prompted",
+            "score": 3,
+            "category": "Governance",
+            "action_status": "Discussed",
+            "summary": (
+                "Assistant City Manager Neves presented the draft 2027 "
+                "City Council meeting calendar for discussion, with no "
+                "formal action taken."
+            ),
+            "why_it_matters": "Sets prospective meeting dates.",
+            "must_include": False,
+        },
+    ]
+
+    assert _coverage_topic_is_bad(
+        "when prompted."
+    )
+
+    assert _repair_coverage_plan_topic_labels(
+        items
+    )
+
+    assert items[0]["topic"] == (
+        "Remote Telephone Access Concerns"
+    )
+    assert items[0]["display_topic"] == (
+        "Remote Telephone Access Concerns"
+    )
+
+    assert items[1]["topic"] == (
+        "Draft 2027 City Council Meeting Calendar"
+    )
+    assert items[1]["display_topic"] == (
+        "Draft 2027 City Council Meeting Calendar"
+    )
+
+    assert coverage_plan_label_issues(
+        items
+    ) == []
+
+
+def test_coverage_topic_guard_flags_unrepairable_meta_label():
+    items = [
+        {
+            "rank": 1,
+            "topic": "as requested",
+            "score": 8,
+            "category": "Other",
+            "action_status": "Discussed",
+            "summary": "",
+            "why_it_matters": "",
+            "must_include": True,
+        }
+    ]
+
+    assert not _repair_coverage_plan_topic_labels(
+        items
+    )
+
+    issues = coverage_plan_label_issues(
+        items
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "material"
+    assert issues[0].field == "coverage_plan"
+    assert issues[0].draft_text == "as requested"
+
+
+def test_coverage_topic_label_defensively_derives_legacy_review_label():
+    item = {
+        "topic": "when prompted.",
+        "category": "Governance",
+        "summary": (
+            "Assistant City Manager Neves presented the draft 2027 "
+            "City Council meeting calendar for discussion."
+        ),
+    }
+
+    assert _coverage_topic_from_summary(
+        item["summary"],
+        item["category"],
+    ) == "Draft 2027 City Council Meeting Calendar"
+
+    assert coverage_topic_label(
+        item
+    ) == "Draft 2027 City Council Meeting Calendar"
 
 
 def test_coverage_money_guard_repairs_spaced_cents_model_error():
