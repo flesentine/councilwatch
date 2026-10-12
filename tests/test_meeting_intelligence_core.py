@@ -1182,7 +1182,7 @@ def test_coverage_topic_guard_flags_unrepairable_meta_label():
             "rank": 1,
             "topic": "as requested",
             "score": 8,
-            "category": "Other",
+            "category": "Governance",
             "action_status": "Discussed",
             "summary": "",
             "why_it_matters": "",
@@ -1202,6 +1202,59 @@ def test_coverage_topic_guard_flags_unrepairable_meta_label():
     assert issues[0].severity == "material"
     assert issues[0].field == "coverage_plan"
     assert issues[0].draft_text == "as requested"
+
+
+
+@pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        (
+            "A resident requested an audit of the traffic signal program.",
+            "Audit Of The Traffic Signal Program",
+        ),
+        (
+            "A resident requested assistance with remote meeting access.",
+            "Assistance With Remote Meeting Access",
+        ),
+    ],
+)
+def test_coverage_topic_request_parser_preserves_optional_article_boundaries(
+    summary,
+    expected,
+):
+    assert _coverage_topic_from_summary(
+        summary,
+        "Public Comment",
+    ) == expected
+
+
+def test_coverage_topic_guard_never_uses_broad_category_as_topic():
+    item = {
+        "rank": 2,
+        "topic": "when prompted",
+        "score": 6,
+        "category": "Budget & Finance",
+        "action_status": "Discussed",
+        "summary": "Staff gave an update.",
+        "why_it_matters": "Budget context.",
+        "must_include": True,
+    }
+
+    assert not _repair_coverage_plan_topic_labels(
+        [item]
+    )
+
+    assert item["topic"] == "when prompted"
+    assert coverage_topic_label(
+        item
+    ) == "Coverage Topic Needs Review"
+
+    issues = coverage_plan_label_issues(
+        [item]
+    )
+
+    assert len(issues) == 1
+    assert issues[0].field == "coverage_plan"
 
 
 def test_coverage_topic_label_defensively_derives_legacy_review_label():
