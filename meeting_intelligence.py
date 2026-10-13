@@ -64,11 +64,11 @@ class CoveragePlan(BaseModel):
 
 
 _COVERAGE_TOPIC_PROMPT_RESIDUE = re.compile(
-    r"^(?:"
+    r"\b(?:"
     r"(?:when|if)\s+(?:prompted|requested|asked|needed|applicable)|"
     r"as\s+(?:requested|needed|appropriate|prompted)|"
     r"upon\s+request"
-    r")(?:\s+.*)?$",
+    r")\b",
     re.I,
 )
 
@@ -122,7 +122,7 @@ def _coverage_topic_is_bad(value):
         return True
 
     return bool(
-        _COVERAGE_TOPIC_PROMPT_RESIDUE.fullmatch(
+        _COVERAGE_TOPIC_PROMPT_RESIDUE.search(
             key
         )
     )
