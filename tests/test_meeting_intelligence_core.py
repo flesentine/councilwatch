@@ -1257,6 +1257,38 @@ def test_coverage_topic_request_parser_preserves_optional_article_boundaries(
     ) == expected
 
 
+def test_coverage_topic_guard_detects_prompt_residue_after_prefix():
+    item = {
+        "rank": 3,
+        "topic": "Public Comment — when prompted",
+        "score": 5,
+        "category": "Public Comment",
+        "action_status": "Public Comment",
+        "summary": (
+            "Residents voiced concerns during public comment regarding "
+            "remote telephone access failures."
+        ),
+        "why_it_matters": "Public access matters.",
+        "must_include": True,
+    }
+
+    assert _coverage_topic_is_bad(
+        item["topic"]
+    )
+
+    assert _repair_coverage_plan_topic_labels(
+        [item]
+    )
+
+    assert item["topic"] == (
+        "Remote Telephone Access Concerns"
+    )
+
+    assert coverage_plan_label_issues(
+        [item]
+    ) == []
+
+
 def test_coverage_topic_guard_never_uses_broad_category_as_topic():
     item = {
         "rank": 2,
