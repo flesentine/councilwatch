@@ -66,7 +66,7 @@ class CoveragePlan(BaseModel):
 _COVERAGE_TOPIC_PROMPT_RESIDUE = re.compile(
     r"\b(?:"
     r"(?:when|if)\s+(?:prompted|requested|asked|needed|applicable)|"
-    r"as\s+(?:requested|needed|appropriate|prompted)|"
+    r"as\s+(?:requested|appropriate|prompted)|"
     r"upon\s+request"
     r")\b",
     re.I,
@@ -119,6 +119,17 @@ def _coverage_topic_is_bad(value):
         return True
 
     if key in _COVERAGE_GENERIC_TOPIC_LABELS:
+        return True
+
+    # "As-needed" is common in legitimate municipal subjects such as
+    # "As-Needed Engineering Services Contract". Treat it as prompt
+    # residue only when it is the whole label or a trailing meta suffix.
+    if (
+        key == "as needed"
+        or key.endswith(
+            " as needed"
+        )
+    ):
         return True
 
     return bool(
