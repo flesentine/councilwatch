@@ -1289,6 +1289,36 @@ def test_coverage_topic_guard_detects_prompt_residue_after_prefix():
     ) == []
 
 
+@pytest.mark.parametrize(
+    ("topic", "expected_bad"),
+    [
+        (
+            "As-Needed Engineering Services Contract",
+            False,
+        ),
+        (
+            "As Needed On-Call Planning Services",
+            False,
+        ),
+        (
+            "as needed",
+            True,
+        ),
+        (
+            "Public Comment — as needed",
+            True,
+        ),
+    ],
+)
+def test_coverage_topic_guard_preserves_legitimate_as_needed_titles(
+    topic,
+    expected_bad,
+):
+    assert _coverage_topic_is_bad(
+        topic
+    ) is expected_bad
+
+
 def test_coverage_topic_guard_never_uses_broad_category_as_topic():
     item = {
         "rank": 2,
