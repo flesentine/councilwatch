@@ -1982,12 +1982,31 @@ def reaudit_story(
                 issue
             )
 
-    coverage_issues = coverage_plan_label_issues(
-        target.get(
-            "coverage_plan",
-            [],
+    default_coverage_plan_status = (
+        "stale_after_manual_edit"
+        if target.get(
+            "manually_edited"
         )
+        else "fresh"
     )
+
+    coverage_plan_status = str(
+        target.get(
+            "coverage_plan_status",
+            default_coverage_plan_status,
+        )
+        or default_coverage_plan_status
+    )
+
+    if coverage_plan_status == "fresh":
+        coverage_issues = coverage_plan_label_issues(
+            target.get(
+                "coverage_plan",
+                [],
+            )
+        )
+    else:
+        coverage_issues = []
 
     existing_issue_keys = {
         (
