@@ -65,8 +65,12 @@ class CoveragePlan(BaseModel):
 
 _COVERAGE_TOPIC_PROMPT_RESIDUE = re.compile(
     r"\b(?:"
-    r"(?:when|if)\s+(?:prompted|requested|asked|needed|applicable)|"
-    r"as\s+(?:requested|appropriate|prompted)|"
+    r"(?:when|if)\s+(?:"
+    r"prompted|requested|asked|needed|necessary|applicable|relevant"
+    r")|"
+    r"as\s+(?:"
+    r"requested|appropriate|prompted|applicable|necessary|relevant"
+    r")|"
     r"upon\s+request"
     r")\b",
     re.I,
@@ -149,13 +153,48 @@ def _coverage_topic_title_case(value):
         if word.isdigit():
             return word
 
-        return (
-            word[:1].upper()
-            + word[1:].lower()
+        # Preserve source spelling for mixed-case names/brands such as
+        # McGirr's, O'Brien, eBike, or iPhone.
+        letters = re.sub(
+            r"[^A-Za-z]",
+            "",
+            word,
+        )
+
+        if any(
+            char.isupper()
+            for char in letters[1:]
+        ):
+            return word
+
+        parts = re.split(
+            r"(['’])",
+            word,
+        )
+
+        if not parts:
+            return word
+
+        parts[0] = (
+            parts[0][:1].upper()
+            + parts[0][1:].lower()
+        )
+
+        for index in range(
+            2,
+            len(parts),
+            2,
+        ):
+            parts[index] = (
+                parts[index].lower()
+            )
+
+        return "".join(
+            parts
         )
 
     return re.sub(
-        r"[A-Za-z0-9]+",
+        r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*",
         fix_word,
         str(value or "").strip(),
     )
