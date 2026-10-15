@@ -1319,6 +1319,37 @@ def test_coverage_topic_guard_preserves_legitimate_as_needed_titles(
     ) is expected_bad
 
 
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "when necessary",
+        "if relevant",
+        "as applicable",
+        "Public Comment — when necessary",
+        "Budget update — if relevant",
+        "Staff report — as applicable",
+    ],
+)
+def test_coverage_topic_guard_rejects_equivalent_prompt_residue(
+    topic,
+):
+    assert _coverage_topic_is_bad(
+        topic
+    )
+
+
+def test_coverage_topic_repair_preserves_possessives_and_mixed_case_names():
+    assert _coverage_topic_from_summary(
+        "A resident spoke regarding McGirr's proposal.",
+        "Public Comment",
+    ) == "McGirr's Proposal"
+
+    assert _coverage_topic_from_summary(
+        "Staff discussed O'Brien's eBike pilot.",
+        "Transportation",
+    ) == "O'Brien's eBike Pilot"
+
+
 def test_coverage_topic_guard_never_uses_broad_category_as_topic():
     item = {
         "rank": 2,
