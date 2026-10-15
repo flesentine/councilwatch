@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from gemini_worker import StoryDraft
+from gemini_worker import AuditIssue, StoryDraft
 from official_entities import (
     official_entity_material,
     find_official_support,
@@ -60,6 +60,451 @@ class CoverageItem(BaseModel):
 class CoveragePlan(BaseModel):
     items: list[CoverageItem]
     editorial_summary: str = ""
+
+
+
+_COVERAGE_TOPIC_PROMPT_RESIDUE = re.compile(
+    r"\b(?:"
+    r"(?:when|if)\s+(?:"
+    r"prompted|requested|asked|needed|necessary|applicable|relevant"
+    r")|"
+    r"as\s+(?:"
+    r"requested|appropriate|prompted|applicable|necessary|relevant"
+    r")|"
+    r"upon\s+request"
+    r")\b",
+    re.I,
+)
+
+_COVERAGE_GENERIC_TOPIC_LABELS = {
+    "agenda item",
+    "council discussion",
+    "discussion",
+    "general",
+    "general discussion",
+    "meeting item",
+    "misc",
+    "miscellaneous",
+    "other",
+    "public comment",
+    "public comments",
+    "staff report",
+    "update",
+}
+
+
+def _coverage_item_value(item, field):
+    if isinstance(item, dict):
+        return item.get(field, "")
+
+    return getattr(item, field, "")
+
+
+def _set_coverage_item_value(item, field, value):
+    if isinstance(item, dict):
+        item[field] = value
+        return
+
+    setattr(item, field, value)
+
+
+def _coverage_topic_key(value):
+    return re.sub(
+        r"[^a-z0-9]+",
+        " ",
+        str(value or "").casefold(),
+    ).strip()
+
+
+def _coverage_topic_is_bad(value):
+    key = _coverage_topic_key(value)
+
+    if not key:
+        return True
+
+    if key in _COVERAGE_GENERIC_TOPIC_LABELS:
+        return True
+
+    # "As-needed" is common in legitimate municipal subjects such as
+    # "As-Needed Engineering Services Contract". Treat it as prompt
+    # residue only when it is the whole label or a trailing meta suffix.
+    if (
+        key == "as needed"
+        or key.endswith(
+            " as needed"
+        )
+    ):
+        return True
+
+    return bool(
+        _COVERAGE_TOPIC_PROMPT_RESIDUE.search(
+            key
+        )
+    )
+
+
+def _coverage_topic_title_case(value):
+    def fix_word(match):
+        word = match.group(0)
+
+        if word.isupper() and len(word) <= 8:
+            return word
+
+        if word.isdigit():
+            return word
+
+        # Preserve source spelling for mixed-case names/brands such as
+        # McGirr's, O'Brien, eBike, or iPhone.
+        letters = re.sub(
+            r"[^A-Za-z]",
+            "",
+            word,
+        )
+
+        if any(
+            char.isupper()
+            for char in letters[1:]
+        ):
+            return word
+
+        parts = re.split(
+            r"(['’])",
+            word,
+        )
+
+        if not parts:
+            return word
+
+        parts[0] = (
+            parts[0][:1].upper()
+            + parts[0][1:].lower()
+        )
+
+        for index in range(
+            2,
+            len(parts),
+            2,
+        ):
+            parts[index] = (
+                parts[index].lower()
+            )
+
+        return "".join(
+            parts
+        )
+
+    return re.sub(
+        r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*",
+        fix_word,
+        str(value or "").strip(),
+    )
+
+
+def _coverage_topic_from_summary(
+    summary,
+    category="",
+):
+    text = re.sub(
+        r"\s+",
+        " ",
+        str(summary or ""),
+    ).strip()
+
+    if not text:
+        return ""
+
+    patterns = (
+        re.compile(
+            r"\bpresented\s+(?:the\s+)?"
+            r"(?P<label>.+?)"
+            r"(?=\s+for\s+(?:discussion|review|consideration)\b|"
+            r",\s+(?:with|which|while|and)\b|[.;]|$)",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?:regarding|about|concerning)\s+"
+            r"(?P<label>.+?)"
+            r"(?=,\s+(?:alleging|requesting|asking|citing|noting|"
+            r"with|which|while|and)\b|[.;]|$)",
+            re.I,
+        ),
+        re.compile(
+            r"\b(?:reviewed|discussed|considered)\s+(?:the\s+)?"
+            r"(?P<label>.+?)"
+            r"(?=,\s+(?:with|which|while|and)\b|[.;]|$)",
+            re.I,
+        ),
+        re.compile(
+            r"\brequested\s+(?:(?:an|a|the)\s+)?"
+            r"(?P<label>.+?)"
+            r"(?=,\s+(?:citing|because|with|which|and)\b|[.;]|$)",
+            re.I,
+        ),
+    )
+
+    candidate = ""
+
+    for pattern in patterns:
+        match = pattern.search(
+            text
+        )
+
+        if match:
+            candidate = match.group(
+                "label"
+            ).strip()
+            break
+
+    if not candidate:
+        return ""
+
+    candidate = re.sub(
+        r"\s+for\s+(?:discussion|review|consideration)\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+
+    candidate = re.sub(
+        r"\s+during\s+(?:the\s+)?"
+        r"(?:[A-Za-z]+\s+\d{1,2},\s+\d{4}\s+)?"
+        r"(?:(?:special|regular)\s+)?meeting\s*$",
+        "",
+        candidate,
+        flags=re.I,
+    )
+
+    candidate = re.sub(
+        r"\s+(?:with|and)\s+no\s+formal\s+action.*$",
+        "",
+        candidate,
+        flags=re.I,
+    ).strip(" ,.;:-")
+
+    if (
+        "public comment"
+        in str(
+            category or ""
+        ).casefold()
+        and re.search(
+            r"\b(?:telephone|phone|remote|access)\b",
+            candidate,
+            re.I,
+        )
+    ):
+        candidate = re.sub(
+            r"\bfailures?\b",
+            "concerns",
+            candidate,
+            flags=re.I,
+        )
+
+    candidate = _coverage_topic_title_case(
+        candidate
+    )
+
+    if _coverage_topic_is_bad(
+        candidate
+    ):
+        return ""
+
+    return candidate
+
+
+def coverage_topic_label(item):
+    display = str(
+        _coverage_item_value(
+            item,
+            "display_topic",
+        )
+        or ""
+    ).strip()
+
+    if not _coverage_topic_is_bad(
+        display
+    ):
+        return display
+
+    topic = str(
+        _coverage_item_value(
+            item,
+            "topic",
+        )
+        or ""
+    ).strip()
+
+    if not _coverage_topic_is_bad(
+        topic
+    ):
+        return topic
+
+    fallback = _coverage_topic_from_summary(
+        _coverage_item_value(
+            item,
+            "summary",
+        ),
+        _coverage_item_value(
+            item,
+            "category",
+        ),
+    )
+
+    if fallback:
+        return fallback
+
+    return "Coverage Topic Needs Review"
+
+
+def _repair_coverage_plan_topic_labels(
+    items,
+):
+    changed = False
+
+    for item in items or []:
+        topic = str(
+            _coverage_item_value(
+                item,
+                "topic",
+            )
+            or ""
+        ).strip()
+
+        display = str(
+            _coverage_item_value(
+                item,
+                "display_topic",
+            )
+            or ""
+        ).strip()
+
+        topic_bad = _coverage_topic_is_bad(
+            topic
+        )
+
+        display_bad = bool(
+            display
+        ) and _coverage_topic_is_bad(
+            display
+        )
+
+        if not topic_bad and not display_bad:
+            continue
+
+        fallback = (
+            topic
+            if not topic_bad
+            else _coverage_topic_from_summary(
+                _coverage_item_value(
+                    item,
+                    "summary",
+                ),
+                _coverage_item_value(
+                    item,
+                    "category",
+                ),
+            )
+        )
+
+        if _coverage_topic_is_bad(
+            fallback
+        ):
+            continue
+
+        if topic_bad:
+            _set_coverage_item_value(
+                item,
+                "topic",
+                fallback,
+            )
+            changed = True
+
+        if (
+            isinstance(
+                item,
+                dict,
+            )
+            and (
+                display_bad
+                or (
+                    topic_bad
+                    and not display
+                )
+            )
+        ):
+            item[
+                "display_topic"
+            ] = fallback
+            changed = True
+
+    return changed
+
+
+def coverage_plan_label_issues(
+    items,
+):
+    issues = []
+
+    for item in items or []:
+        display = str(
+            _coverage_item_value(
+                item,
+                "display_topic",
+            )
+            or ""
+        ).strip()
+
+        topic = str(
+            _coverage_item_value(
+                item,
+                "topic",
+            )
+            or ""
+        ).strip()
+
+        invalid_labels = []
+
+        if _coverage_topic_is_bad(
+            topic
+        ):
+            invalid_labels.append(
+                topic
+                or "(blank coverage topic)"
+            )
+
+        if (
+            display
+            and _coverage_topic_is_bad(
+                display
+            )
+        ):
+            invalid_labels.append(
+                display
+            )
+
+        if not invalid_labels:
+            continue
+
+        for label in dict.fromkeys(
+            invalid_labels
+        ):
+            issues.append(
+                AuditIssue(
+                    severity="material",
+                    field="coverage_plan",
+                    draft_text=label,
+                    source_evidence=(
+                        "Coverage-plan topic labels must identify a "
+                        "substantive meeting topic and must not contain "
+                        "prompt/meta instructions or generic placeholders."
+                    ),
+                    correction=(
+                        "Replace the coverage-plan label with a concise, "
+                        "source-derived topic name or official agenda title."
+                    ),
+                )
+            )
+
+    return issues
 
 
 class ActionRecord(BaseModel):
@@ -9334,6 +9779,12 @@ discussion. In particular, distinguish speed-feedback/digital
 signage from ALPR/Flock unless the source clearly establishes
 they are the same technology or part of the same proposal.
 
+TOPIC LABEL RULE:
+Every topic field must be a concise, descriptive noun phrase that
+identifies the actual meeting subject. Never output prompt/meta
+fragments such as "when prompted", "if prompted", "as requested",
+"when applicable", "as needed", or similar instructions as a topic.
+
 The summary and why_it_matters fields must NOT introduce new
 facts or consequences. They are editorial ranking aids only.
 
@@ -9407,6 +9858,10 @@ that a useful local story should not omit.
         plan = CoveragePlan.model_validate_json(
             response.text
         )
+
+    _repair_coverage_plan_topic_labels(
+        plan.items,
+    )
 
     _guard_conduit_financing_coverage_plan(
         plan,
@@ -9849,6 +10304,13 @@ def build_meeting_intelligence(
         action_ledger,
     )
 
+    _repair_coverage_plan_topic_labels(
+        coverage.get(
+            "items",
+            [],
+        ),
+    )
+
     editorial = str(
         coverage.get(
             "editorial_summary",
@@ -10282,13 +10744,8 @@ def writer_context(
             else "OPTIONAL"
         )
 
-        display_topic = (
-            item.get(
-                "display_topic"
-            )
-            or item.get(
-                "topic"
-            )
+        display_topic = coverage_topic_label(
+            item
         )
 
         lines.append(

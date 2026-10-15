@@ -245,6 +245,169 @@ def test_story_and_edit_rendering(env):
     assert "Note one\nNote two" in edit
 
 
+
+def test_story_hides_prompt_residue_in_legacy_coverage_plan(env):
+    data = draft(
+        coverage_plan=[
+            {
+                "rank": 3,
+                "score": 5,
+                "must_include": True,
+                "topic": "when prompted.",
+                "category": "Public Comment",
+                "action_status": "Public Comment",
+                "summary": (
+                    "Residents voiced concerns during public comment "
+                    "regarding remote telephone access failures during "
+                    "the September 17, 2026 special meeting, alleging "
+                    "speakers were excluded."
+                ),
+                "why_it_matters": "Public access matters.",
+            }
+        ]
+    )
+    put(env, data)
+
+    page = body_text(
+        review.story(
+            "alpha",
+            "100",
+        )
+    )
+
+    assert "when prompted" not in page.lower()
+    assert "Remote Telephone Access Concerns" in page
+
+
+def test_reaudit_fails_closed_on_malformed_coverage_topic(
+    env,
+    monkeypatch,
+):
+    path = put(
+        env,
+        draft(
+            audit_ok=True,
+            coverage_plan=[
+                {
+                    "rank": 1,
+                    "score": 8,
+                    "must_include": True,
+                    "topic": "as requested",
+                    "category": "Other",
+                    "action_status": "Discussed",
+                    "summary": "",
+                    "why_it_matters": "",
+                }
+            ],
+        ),
+    )
+
+    (env["drafts"] / "alpha--100.notes.txt").write_text(
+        "SOURCE NOTES",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        review,
+        "audit_story",
+        lambda meeting, notes, agenda, story: AuditResult(
+            ok=True,
+            issues=[],
+        ),
+    )
+
+    monkeypatch.setattr(
+        review,
+        "load_agenda_evidence",
+        lambda *args, **kwargs: (
+            "",
+            "",
+        ),
+    )
+
+    result = review.reaudit_story(
+        "alpha",
+        "100",
+    )
+
+    assert result["audit_ok"] is False
+    assert result["material"] == 1
+
+    stored = review.read_json(
+        path
+    )
+
+    assert stored["audit_issues"][0]["field"] == "coverage_plan"
+    assert stored["audit_issues"][0]["draft_text"] == "as requested"
+
+
+def test_reaudit_skips_stale_coverage_plan_labels(
+    env,
+    monkeypatch,
+):
+    path = put(
+        env,
+        draft(
+            audit_ok=False,
+            manually_edited=True,
+            audit_status="stale_after_manual_edit",
+            coverage_plan_status="stale_after_manual_edit",
+            coverage_plan=[
+                {
+                    "rank": 1,
+                    "score": 8,
+                    "must_include": True,
+                    "topic": "as requested",
+                    "category": "Other",
+                    "action_status": "Discussed",
+                    "summary": "",
+                    "why_it_matters": "",
+                }
+            ],
+        ),
+    )
+
+    (env["drafts"] / "alpha--100.notes.txt").write_text(
+        "SOURCE NOTES",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        review,
+        "audit_story",
+        lambda meeting, notes, agenda, story: AuditResult(
+            ok=True,
+            issues=[],
+        ),
+    )
+
+    monkeypatch.setattr(
+        review,
+        "load_agenda_evidence",
+        lambda *args, **kwargs: (
+            "",
+            "",
+        ),
+    )
+
+    result = review.reaudit_story(
+        "alpha",
+        "100",
+    )
+
+    assert result["audit_ok"] is True
+    assert result["material"] == 0
+
+    stored = review.read_json(
+        path
+    )
+
+    assert stored["audit_issues"] == []
+    assert stored["coverage_plan_status"] == (
+        "stale_after_manual_edit"
+    )
+
+
 def test_story_published_stale_and_newsletter_labels(env):
     data = draft(
         published=True,

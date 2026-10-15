@@ -16,7 +16,11 @@ from evidence import (
     write_reviewer_evidence,
 )
 from gemini_worker import StoryDraft, audit_story
-from meeting_intelligence import audit_verification_context
+from meeting_intelligence import (
+    audit_verification_context,
+    coverage_plan_label_issues,
+    coverage_topic_label,
+)
 from newsletter import ensure_buttondown_draft
 from publishing import (
     publish_copy,
@@ -645,7 +649,7 @@ def story(slug: str, external_id: str):
                 f"#{esc(item.get('rank'))} · "
                 f"{esc(item.get('score'))}/10"
                 f"{must} · "
-                f"{esc(item.get('display_topic') or item.get('topic'))}"
+                f"{esc(coverage_topic_label(item))}"
                 f"</strong>"
                 f"<br>Status: "
                 f"{esc(item.get('action_status'))}"
@@ -1976,6 +1980,56 @@ def reaudit_story(
         ):
             valid.append(
                 issue
+            )
+
+    default_coverage_plan_status = (
+        "stale_after_manual_edit"
+        if target.get(
+            "manually_edited"
+        )
+        else "fresh"
+    )
+
+    coverage_plan_status = str(
+        target.get(
+            "coverage_plan_status",
+            default_coverage_plan_status,
+        )
+        or default_coverage_plan_status
+    )
+
+    if coverage_plan_status == "fresh":
+        coverage_issues = coverage_plan_label_issues(
+            target.get(
+                "coverage_plan",
+                [],
+            )
+        )
+    else:
+        coverage_issues = []
+
+    existing_issue_keys = {
+        (
+            issue.field,
+            issue.draft_text,
+            issue.source_evidence,
+        )
+        for issue in valid
+    }
+
+    for issue in coverage_issues:
+        key = (
+            issue.field,
+            issue.draft_text,
+            issue.source_evidence,
+        )
+
+        if key not in existing_issue_keys:
+            valid.append(
+                issue
+            )
+            existing_issue_keys.add(
+                key
             )
 
     material = [

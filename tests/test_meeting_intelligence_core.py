@@ -33,6 +33,11 @@ from meeting_intelligence import (
     _formal_action_record_supported,
     _formal_status_supported,
     _guard_coverage_plan_money_values,
+    _coverage_topic_is_bad,
+    _coverage_topic_from_summary,
+    _repair_coverage_plan_topic_labels,
+    coverage_plan_label_issues,
+    coverage_topic_label,
     _local_topic_anchor_supported,
     _nonformal_source_supported,
     _quote_is_in_source,
@@ -1109,6 +1114,289 @@ def test_coverage_reconciliation_leaves_unmatched_topic_unchanged():
     )
 
     assert items[0] == original
+
+
+
+def test_coverage_topic_guard_repairs_prompt_residue_from_summary():
+    items = [
+        {
+            "rank": 3,
+            "topic": "when prompted.",
+            "score": 5,
+            "category": "Public Comment",
+            "action_status": "Public Comment",
+            "summary": (
+                "Residents voiced concerns during public comment regarding "
+                "remote telephone access failures during the September 17, "
+                "2026 special meeting, alleging speakers were excluded."
+            ),
+            "why_it_matters": "Remote access affects public participation.",
+            "must_include": True,
+        },
+        {
+            "rank": 5,
+            "topic": "if prompted",
+            "score": 3,
+            "category": "Governance",
+            "action_status": "Discussed",
+            "summary": (
+                "Assistant City Manager Neves presented the draft 2027 "
+                "City Council meeting calendar for discussion, with no "
+                "formal action taken."
+            ),
+            "why_it_matters": "Sets prospective meeting dates.",
+            "must_include": False,
+        },
+    ]
+
+    assert _coverage_topic_is_bad(
+        "when prompted."
+    )
+
+    assert _repair_coverage_plan_topic_labels(
+        items
+    )
+
+    assert items[0]["topic"] == (
+        "Remote Telephone Access Concerns"
+    )
+    assert items[0]["display_topic"] == (
+        "Remote Telephone Access Concerns"
+    )
+
+    assert items[1]["topic"] == (
+        "Draft 2027 City Council Meeting Calendar"
+    )
+    assert items[1]["display_topic"] == (
+        "Draft 2027 City Council Meeting Calendar"
+    )
+
+    assert coverage_plan_label_issues(
+        items
+    ) == []
+
+
+def test_coverage_topic_guard_flags_unrepairable_meta_label():
+    items = [
+        {
+            "rank": 1,
+            "topic": "as requested",
+            "score": 8,
+            "category": "Governance",
+            "action_status": "Discussed",
+            "summary": "",
+            "why_it_matters": "",
+            "must_include": True,
+        }
+    ]
+
+    assert not _repair_coverage_plan_topic_labels(
+        items
+    )
+
+    issues = coverage_plan_label_issues(
+        items
+    )
+
+    assert len(issues) == 1
+    assert issues[0].severity == "material"
+    assert issues[0].field == "coverage_plan"
+    assert issues[0].draft_text == "as requested"
+
+
+
+def test_coverage_topic_guard_validates_raw_topic_even_with_valid_display():
+    item = {
+        "rank": 3,
+        "topic": "when prompted",
+        "display_topic": "Remote Telephone Access Concerns",
+        "score": 5,
+        "category": "Public Comment",
+        "action_status": "Public Comment",
+        "summary": (
+            "Residents voiced concerns during public comment regarding "
+            "remote telephone access failures."
+        ),
+        "why_it_matters": "Public access matters.",
+        "must_include": True,
+    }
+
+    assert coverage_topic_label(
+        item
+    ) == "Remote Telephone Access Concerns"
+
+    issues = coverage_plan_label_issues(
+        [item]
+    )
+
+    assert len(issues) == 1
+    assert issues[0].field == "coverage_plan"
+    assert issues[0].draft_text == "when prompted"
+
+
+@pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        (
+            "A resident requested an audit of the traffic signal program.",
+            "Audit Of The Traffic Signal Program",
+        ),
+        (
+            "A resident requested assistance with remote meeting access.",
+            "Assistance With Remote Meeting Access",
+        ),
+    ],
+)
+def test_coverage_topic_request_parser_preserves_optional_article_boundaries(
+    summary,
+    expected,
+):
+    assert _coverage_topic_from_summary(
+        summary,
+        "Public Comment",
+    ) == expected
+
+
+def test_coverage_topic_guard_detects_prompt_residue_after_prefix():
+    item = {
+        "rank": 3,
+        "topic": "Public Comment — when prompted",
+        "score": 5,
+        "category": "Public Comment",
+        "action_status": "Public Comment",
+        "summary": (
+            "Residents voiced concerns during public comment regarding "
+            "remote telephone access failures."
+        ),
+        "why_it_matters": "Public access matters.",
+        "must_include": True,
+    }
+
+    assert _coverage_topic_is_bad(
+        item["topic"]
+    )
+
+    assert _repair_coverage_plan_topic_labels(
+        [item]
+    )
+
+    assert item["topic"] == (
+        "Remote Telephone Access Concerns"
+    )
+
+    assert coverage_plan_label_issues(
+        [item]
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("topic", "expected_bad"),
+    [
+        (
+            "As-Needed Engineering Services Contract",
+            False,
+        ),
+        (
+            "As Needed On-Call Planning Services",
+            False,
+        ),
+        (
+            "as needed",
+            True,
+        ),
+        (
+            "Public Comment — as needed",
+            True,
+        ),
+    ],
+)
+def test_coverage_topic_guard_preserves_legitimate_as_needed_titles(
+    topic,
+    expected_bad,
+):
+    assert _coverage_topic_is_bad(
+        topic
+    ) is expected_bad
+
+
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "when necessary",
+        "if relevant",
+        "as applicable",
+        "Public Comment — when necessary",
+        "Budget update — if relevant",
+        "Staff report — as applicable",
+    ],
+)
+def test_coverage_topic_guard_rejects_equivalent_prompt_residue(
+    topic,
+):
+    assert _coverage_topic_is_bad(
+        topic
+    )
+
+
+def test_coverage_topic_repair_preserves_possessives_and_mixed_case_names():
+    assert _coverage_topic_from_summary(
+        "A resident spoke regarding McGirr's proposal.",
+        "Public Comment",
+    ) == "McGirr's Proposal"
+
+    assert _coverage_topic_from_summary(
+        "Staff discussed O'Brien's eBike pilot.",
+        "Transportation",
+    ) == "O'Brien's eBike Pilot"
+
+
+def test_coverage_topic_guard_never_uses_broad_category_as_topic():
+    item = {
+        "rank": 2,
+        "topic": "when prompted",
+        "score": 6,
+        "category": "Budget & Finance",
+        "action_status": "Discussed",
+        "summary": "Staff gave an update.",
+        "why_it_matters": "Budget context.",
+        "must_include": True,
+    }
+
+    assert not _repair_coverage_plan_topic_labels(
+        [item]
+    )
+
+    assert item["topic"] == "when prompted"
+    assert coverage_topic_label(
+        item
+    ) == "Coverage Topic Needs Review"
+
+    issues = coverage_plan_label_issues(
+        [item]
+    )
+
+    assert len(issues) == 1
+    assert issues[0].field == "coverage_plan"
+
+
+def test_coverage_topic_label_defensively_derives_legacy_review_label():
+    item = {
+        "topic": "when prompted.",
+        "category": "Governance",
+        "summary": (
+            "Assistant City Manager Neves presented the draft 2027 "
+            "City Council meeting calendar for discussion."
+        ),
+    }
+
+    assert _coverage_topic_from_summary(
+        item["summary"],
+        item["category"],
+    ) == "Draft 2027 City Council Meeting Calendar"
+
+    assert coverage_topic_label(
+        item
+    ) == "Draft 2027 City Council Meeting Calendar"
 
 
 def test_coverage_money_guard_repairs_spaced_cents_model_error():

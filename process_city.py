@@ -27,6 +27,7 @@ from meeting_intelligence import (
     retry_api_call,
     _conduit_financing_agenda_contexts,
     _conduit_text_matches_context,
+    coverage_plan_label_issues,
 )
 from notifications import notify_ready_for_review
 from settings import (
@@ -7293,6 +7294,15 @@ def process_city(
             missing_required_topic_issues(
                 story,
                 intelligence,
+            )
+        )
+
+        deterministic_action_issues.extend(
+            coverage_plan_label_issues(
+                intelligence.get(
+                    "coverage_items",
+                    [],
+                )
             )
         )
 
