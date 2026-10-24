@@ -279,6 +279,104 @@ def test_story_hides_prompt_residue_in_legacy_coverage_plan(env):
     assert "Remote Telephone Access Concerns" in page
 
 
+def test_reaudit_normalizes_fresh_saved_coverage_plan(
+    env,
+    monkeypatch,
+):
+    path = put(
+        env,
+        draft(
+            audit_ok=True,
+            coverage_plan=[
+                {
+                    "rank": 2,
+                    "score": 6,
+                    "must_include": True,
+                    "topic": "Late-Night Operating Hours Permit for Naz's Halal Food",
+                    "category": "Land Use",
+                    "action_status": "Discussed",
+                    "summary": (
+                        "The Planning Commission unanimously approved a use permit "
+                        "authorizing Naz's Halal Food to extend its operating hours."
+                    ),
+                    "why_it_matters": "Late-night operations affect nearby residents.",
+                },
+                {
+                    "rank": 4,
+                    "score": 2,
+                    "must_include": False,
+                    "topic": "Civic Center Dr, Lake Forest, CA 92630",
+                    "category": "Commissioner Comments",
+                    "action_status": "Discussed",
+                    "summary": (
+                        "During closing commissioner comments, members discussed "
+                        "commercial restaurant activity across the city, noting "
+                        "restaurant closures and openings."
+                    ),
+                    "why_it_matters": "Tracks local commercial turnover.",
+                },
+            ],
+            action_ledger=[
+                {
+                    "topic": "Use Permit for Naz's Halal Food",
+                    "action_status": "approved",
+                    "validated": True,
+                    "agenda_linkage_conflict": False,
+                    "agenda_title": (
+                        "USE PERMIT 08-26-5893, A REQUEST FOR LATE-NIGHT HOURS "
+                        "FOR AN EXISTING RESTAURANT, NAZ'S HALAL FOOD"
+                    ),
+                }
+            ],
+        ),
+    )
+
+    (env["drafts"] / "alpha--100.notes.txt").write_text(
+        "SOURCE NOTES",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        review,
+        "audit_story",
+        lambda meeting, notes, agenda, story: AuditResult(
+            ok=True,
+            issues=[],
+        ),
+    )
+
+    monkeypatch.setattr(
+        review,
+        "load_agenda_evidence",
+        lambda *args, **kwargs: (
+            "",
+            "",
+        ),
+    )
+
+    result = review.reaudit_story(
+        "alpha",
+        "100",
+    )
+
+    assert result["audit_ok"] is True
+
+    stored = review.read_json(
+        path
+    )
+    naz, comments = stored[
+        "coverage_plan"
+    ]
+
+    assert naz["action_status"] == "Approved"
+    assert comments["topic"] == (
+        "Commercial Restaurant Activity Across The City"
+    )
+    assert comments["display_topic"] == (
+        "Commercial Restaurant Activity Across The City"
+    )
+
+
 def test_reaudit_fails_closed_on_malformed_coverage_topic(
     env,
     monkeypatch,

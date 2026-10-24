@@ -9991,6 +9991,49 @@ def _reconcile_coverage_items_with_action_ledger(
         )
 
         if not matches:
+            candidates = []
+
+            for actions in validated_by_topic.values():
+                for action in actions:
+                    action_identity = " ".join(
+                        part
+                        for part in (
+                            str(
+                                action.get(
+                                    "topic",
+                                    "",
+                                )
+                                or ""
+                            ).strip(),
+                            str(
+                                action.get(
+                                    "agenda_title",
+                                    "",
+                                )
+                                or ""
+                            ).strip(),
+                        )
+                        if part
+                    )
+
+                    if (
+                        action_identity
+                        and _topic_scope_supported(
+                            item.get(
+                                "topic",
+                                "",
+                            ),
+                            action_identity,
+                        )
+                    ):
+                        candidates.append(
+                            action
+                        )
+
+            if len(candidates) == 1:
+                matches = candidates
+
+        if not matches:
             continue
 
         statuses = {
@@ -10213,8 +10256,13 @@ def normalize_cached_intelligence(
 
     coverage_items = intelligence.get(
         "coverage_items",
-        [],
     )
+
+    if coverage_items is None:
+        coverage_items = intelligence.get(
+            "coverage_plan",
+            [],
+        )
 
     action_ledger = intelligence.get(
         "action_ledger",
