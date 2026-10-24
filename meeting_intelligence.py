@@ -92,6 +92,13 @@ _COVERAGE_GENERIC_TOPIC_LABELS = {
     "update",
 }
 
+_COVERAGE_ADDRESS_TOPIC = re.compile(
+    r"\b(?:street|st|road|rd|drive|dr|avenue|ave|"
+    r"boulevard|blvd|way|lane|ln|court|ct|parkway|pkwy)\b"
+    r".*?,\s*[A-Za-z .'-]+,\s*CA\s+\d{5}(?:-\d{4})?\b",
+    re.I,
+)
+
 
 def _coverage_item_value(item, field):
     if isinstance(item, dict):
@@ -123,6 +130,11 @@ def _coverage_topic_is_bad(value):
         return True
 
     if key in _COVERAGE_GENERIC_TOPIC_LABELS:
+        return True
+
+    if _COVERAGE_ADDRESS_TOPIC.search(
+        str(value or "").strip()
+    ):
         return True
 
     # "As-needed" is common in legitimate municipal subjects such as
@@ -10182,6 +10194,45 @@ def _reconcile_coverage_items_with_action_ledger(
 
     return changed
 
+
+
+
+def normalize_cached_intelligence(
+    intelligence,
+):
+    """
+    Bring persisted intelligence forward through deterministic
+    coverage-plan guards added after the cache was created.
+    """
+    if not isinstance(
+        intelligence,
+        dict,
+    ):
+        return False
+
+    coverage_items = intelligence.get(
+        "coverage_items",
+        [],
+    )
+
+    action_ledger = intelligence.get(
+        "action_ledger",
+        [],
+    )
+
+    changed = (
+        _reconcile_coverage_items_with_action_ledger(
+            coverage_items,
+            action_ledger,
+        )
+    )
+
+    if _repair_coverage_plan_topic_labels(
+        coverage_items
+    ):
+        changed = True
+
+    return changed
 
 
 def build_meeting_intelligence(
