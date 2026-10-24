@@ -1848,8 +1848,25 @@ def reaudit_story(
                 intelligence,
             )
 
-    if normalize_cached_intelligence(
-        target
+    target_coverage_status = str(
+        target.get(
+            "coverage_plan_status",
+            (
+                "stale_after_manual_edit"
+                if target.get(
+                    "manually_edited"
+                )
+                else "fresh"
+            ),
+        )
+        or "fresh"
+    )
+
+    if (
+        target_coverage_status == "fresh"
+        and normalize_cached_intelligence(
+            target
+        )
     ):
         target["coverage_plan_status"] = "fresh"
 
