@@ -1093,6 +1093,44 @@ def test_coverage_reconciliation_normalizes_warrant_summary_to_passed():
     assert items[0]["topic"].startswith("Warrant Register Approval")
 
 
+def test_coverage_reconciliation_uses_unique_strong_topic_overlap():
+    items = [
+        {
+            "rank": 2,
+            "topic": "Late-Night Operating Hours Permit for Naz's Halal Food",
+            "score": 6,
+            "category": "Land Use",
+            "action_status": "Discussed",
+            "summary": (
+                "The Planning Commission unanimously approved a use permit "
+                "authorizing Naz's Halal Food to extend its operating hours."
+            ),
+            "why_it_matters": "Late-night operations affect nearby residents.",
+            "must_include": True,
+        }
+    ]
+
+    ledger = [
+        {
+            "topic": "Use Permit for Naz's Halal Food",
+            "action_status": "approved",
+            "validated": True,
+            "agenda_linkage_conflict": False,
+            "agenda_title": (
+                "USE PERMIT 08-26-5893, A REQUEST FOR LATE-NIGHT HOURS "
+                "FOR AN EXISTING RESTAURANT, NAZ'S HALAL FOOD"
+            ),
+        }
+    ]
+
+    assert _reconcile_coverage_items_with_action_ledger(
+        items,
+        ledger,
+    )
+
+    assert items[0]["action_status"] == "Approved"
+
+
 def test_coverage_reconciliation_leaves_unmatched_topic_unchanged():
     items = [
         {
