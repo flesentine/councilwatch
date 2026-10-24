@@ -243,7 +243,8 @@ def _coverage_topic_from_summary(
         re.compile(
             r"\b(?:reviewed|discussed|considered)\s+(?:the\s+)?"
             r"(?P<label>.+?)"
-            r"(?=,\s+(?:with|which|while|and)\b|[.;]|$)",
+            r"(?=,\s+(?:with|which|while|and|noting|citing|asking|"
+            r"requesting|alleging)\b|[.;]|$)",
             re.I,
         ),
         re.compile(
