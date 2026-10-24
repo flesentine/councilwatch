@@ -169,6 +169,82 @@ def test_cached_notes_and_intelligence_complete_clean_lifecycle_and_notification
     assert city["draft"] == "lake-forest--123.json"
 
 
+def test_cached_intelligence_is_normalized_and_rewritten(
+    monkeypatch,
+    isolated_runtime,
+):
+    drafts, _work, _status_file = isolated_runtime
+    notes_path(drafts).write_text(
+        "cached source notes " * 20,
+        encoding="utf-8",
+    )
+    cached = {
+        "entities": [],
+        "action_ledger": [],
+        "coverage_items": [
+            {
+                "rank": 4,
+                "topic": "Civic Center Dr, Lake Forest, CA 92630",
+                "score": 2,
+                "category": "Commissioner Comments",
+                "action_status": "Discussed",
+                "summary": (
+                    "During closing commissioner comments, members discussed "
+                    "commercial restaurant activity across the city, noting "
+                    "restaurant closures and openings."
+                ),
+                "why_it_matters": "Tracks local commercial turnover.",
+                "must_include": False,
+            }
+        ],
+        "editorial_summary": "",
+    }
+    intelligence_path(drafts).write_text(
+        json.dumps(cached),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        pc,
+        "make_rich_story",
+        lambda *args: clean_story(),
+    )
+    monkeypatch.setattr(
+        pc,
+        "audit_story",
+        lambda *args: clean_audit(),
+    )
+    monkeypatch.setattr(
+        pc,
+        "agenda_text",
+        lambda _url: "Official agenda material",
+    )
+    monkeypatch.setattr(
+        pc,
+        "notify_ready_for_review",
+        lambda *args: None,
+    )
+
+    pc.process_city(
+        "lake-forest",
+        meeting_override=meeting(),
+    )
+
+    refreshed = json.loads(
+        intelligence_path(drafts).read_text(
+            encoding="utf-8"
+        )
+    )
+    item = refreshed["coverage_items"][0]
+
+    assert item["topic"] == (
+        "Commercial Restaurant Activity Across The City"
+    )
+    assert item["display_topic"] == (
+        "Commercial Restaurant Activity Across The City"
+    )
+
+
 def test_caption_acquisition_rebuilds_intelligence_and_tolerates_agenda_failure(
     monkeypatch,
     isolated_runtime,
