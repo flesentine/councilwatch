@@ -9,7 +9,12 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-from settings import GEMINI_API_KEY, TRANSCRIPT_MODEL, STORY_MODEL
+from settings import (
+    GEMINI_API_KEY,
+    TRANSCRIPT_MODEL,
+    STORY_MODEL,
+    STORY_FALLBACK_MODELS,
+)
 
 
 class StoryDraft(BaseModel):
@@ -49,6 +54,76 @@ def client():
             "GOOGLE_API_KEY, GOOGLE_GENAI_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY."
         )
     return genai.Client(api_key=GEMINI_API_KEY)
+
+
+def _story_model_candidates():
+    candidates = [
+        STORY_MODEL,
+        *STORY_FALLBACK_MODELS,
+    ]
+    seen = set()
+    result = []
+
+    for model in candidates:
+        model = str(model or "").strip()
+
+        if not model or model in seen:
+            continue
+
+        seen.add(model)
+        result.append(model)
+
+    return result
+
+
+def _retryable_story_model_error(exc):
+    return getattr(
+        exc,
+        "status_code",
+        None,
+    ) in {
+        429,
+        503,
+    }
+
+
+def _generate_story_content_with_fallback(
+    c,
+    *,
+    contents,
+    config,
+):
+    models = _story_model_candidates()
+
+    if not models:
+        raise RuntimeError(
+            "No Gemini story models are configured."
+        )
+
+    for index, model in enumerate(models):
+        try:
+            return c.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as exc:
+            if (
+                not _retryable_story_model_error(
+                    exc
+                )
+                or index
+                == len(models) - 1
+            ):
+                raise
+
+            print(
+                "Gemini story model "
+                f"{model} unavailable "
+                f"({getattr(exc, 'status_code', 'unknown')}); "
+                "trying fallback.",
+                flush=True,
+            )
 
 
 def _wait_active(c, uploaded, timeout=900):
@@ -1356,8 +1431,8 @@ AGENDA:
 DRAFT JSON:
 {json.dumps(article, ensure_ascii=False)}
 """
-    response = c.models.generate_content(
-        model=STORY_MODEL,
+    response = _generate_story_content_with_fallback(
+        c,
         contents=prompt,
         config=types.GenerateContentConfig(
             temperature=0.03,

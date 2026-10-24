@@ -431,3 +431,122 @@ def test_audit_story_parses_fake_model_result_and_runs_guard(monkeypatch):
     assert result.corrected_dek == ""
     assert calls[0]["model"] == gw.STORY_MODEL
     assert "PUBLISHABLE PERSON NAMES" in calls[0]["contents"]
+
+
+class _FakeGeminiError(RuntimeError):
+    def __init__(self, status_code):
+        super().__init__(f"Gemini error {status_code}")
+        self.status_code = status_code
+
+
+def test_audit_story_falls_back_on_retryable_model_error(monkeypatch):
+    current = story()
+    raw = gw.AuditResult(
+        ok=True,
+        issues=[],
+    )
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+
+        if kwargs["model"] == "primary-model":
+            raise _FakeGeminiError(503)
+
+        return SimpleNamespace(
+            text=raw.model_dump_json()
+        )
+
+    fake_client = SimpleNamespace(
+        models=SimpleNamespace(
+            generate_content=generate_content,
+        )
+    )
+
+    monkeypatch.setattr(
+        gw,
+        "STORY_MODEL",
+        "primary-model",
+    )
+    monkeypatch.setattr(
+        gw,
+        "STORY_FALLBACK_MODELS",
+        [
+            "primary-model",
+            "fallback-model",
+        ],
+    )
+    monkeypatch.setattr(
+        gw,
+        "client",
+        lambda: fake_client,
+    )
+
+    result = gw.audit_story(
+        {
+            "city_name": "Lake Forest",
+            "meeting_date": "2026-08-18",
+        },
+        whitelist_notes("Stephanie Oddo"),
+        "Official agenda",
+        current,
+    )
+
+    assert result.ok is True
+    assert [
+        call["model"]
+        for call in calls
+    ] == [
+        "primary-model",
+        "fallback-model",
+    ]
+
+
+def test_audit_story_does_not_fallback_on_nonretryable_error(monkeypatch):
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        raise _FakeGeminiError(400)
+
+    fake_client = SimpleNamespace(
+        models=SimpleNamespace(
+            generate_content=generate_content,
+        )
+    )
+
+    monkeypatch.setattr(
+        gw,
+        "STORY_MODEL",
+        "primary-model",
+    )
+    monkeypatch.setattr(
+        gw,
+        "STORY_FALLBACK_MODELS",
+        ["fallback-model"],
+    )
+    monkeypatch.setattr(
+        gw,
+        "client",
+        lambda: fake_client,
+    )
+
+    with pytest.raises(
+        _FakeGeminiError,
+    ):
+        gw.audit_story(
+            {
+                "city_name": "Lake Forest",
+                "meeting_date": "2026-08-18",
+            },
+            whitelist_notes("Stephanie Oddo"),
+            "Official agenda",
+            story(),
+        )
+
+    assert [
+        call["model"]
+        for call in calls
+    ] == [
+        "primary-model",
+    ]
