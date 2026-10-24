@@ -20,6 +20,7 @@ from meeting_intelligence import (
     audit_verification_context,
     coverage_plan_label_issues,
     coverage_topic_label,
+    normalize_cached_intelligence,
 )
 from newsletter import ensure_buttondown_draft
 from publishing import (
@@ -1837,6 +1838,20 @@ def reaudit_story(
                 intelligence = loaded
         except Exception:
             intelligence = {}
+
+    if intelligence:
+        if normalize_cached_intelligence(
+            intelligence
+        ):
+            write_json(
+                intelligence_path,
+                intelligence,
+            )
+
+    if normalize_cached_intelligence(
+        target
+    ):
+        target["coverage_plan_status"] = "fresh"
 
     verification_context = ""
 
