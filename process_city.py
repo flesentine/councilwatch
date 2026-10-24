@@ -28,6 +28,7 @@ from meeting_intelligence import (
     _conduit_financing_agenda_contexts,
     _conduit_text_matches_context,
     coverage_plan_label_issues,
+    normalize_cached_intelligence,
 )
 from notifications import notify_ready_for_review
 from settings import (
@@ -6892,6 +6893,23 @@ def process_city(
                     encoding="utf-8"
                 )
             )
+
+            if normalize_cached_intelligence(
+                intelligence
+            ):
+                intelligence_file.write_text(
+                    json.dumps(
+                        intelligence,
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+
+                print(
+                    "Updated cached coverage plan "
+                    "with current deterministic guards."
+                )
 
         else:
             update_status(
