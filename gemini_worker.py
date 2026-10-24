@@ -76,14 +76,66 @@ def _story_model_candidates():
     return result
 
 
-def _retryable_story_model_error(exc):
-    return getattr(
+def _story_model_error_code(exc):
+    for attr in (
+        "code",
+        "status_code",
+    ):
+        value = getattr(
+            exc,
+            attr,
+            None,
+        )
+
+        if isinstance(value, int):
+            return value
+
+    response = getattr(
         exc,
+        "response",
+        None,
+    )
+    value = getattr(
+        response,
         "status_code",
         None,
+    )
+
+    if isinstance(value, int):
+        return value
+
+    details = getattr(
+        exc,
+        "details",
+        None,
+    )
+
+    if isinstance(details, dict):
+        value = details.get(
+            "code",
+            details.get(
+                "error",
+                {},
+            ).get(
+                "code",
+            ),
+        )
+
+        if isinstance(value, int):
+            return value
+
+    return None
+
+
+def _retryable_story_model_error(exc):
+    return _story_model_error_code(
+        exc
     ) in {
         429,
+        500,
+        502,
         503,
+        504,
     }
 
 
@@ -120,7 +172,7 @@ def _generate_story_content_with_fallback(
             print(
                 "Gemini story model "
                 f"{model} unavailable "
-                f"({getattr(exc, 'status_code', 'unknown')}); "
+                f"({_story_model_error_code(exc) or 'unknown'}); "
                 "trying fallback.",
                 flush=True,
             )

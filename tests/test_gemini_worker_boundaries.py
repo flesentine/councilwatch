@@ -434,9 +434,9 @@ def test_audit_story_parses_fake_model_result_and_runs_guard(monkeypatch):
 
 
 class _FakeGeminiError(RuntimeError):
-    def __init__(self, status_code):
-        super().__init__(f"Gemini error {status_code}")
-        self.status_code = status_code
+    def __init__(self, code):
+        super().__init__(f"Gemini error {code}")
+        self.code = code
 
 
 def test_audit_story_falls_back_on_retryable_model_error(monkeypatch):
@@ -500,6 +500,23 @@ def test_audit_story_falls_back_on_retryable_model_error(monkeypatch):
         "primary-model",
         "fallback-model",
     ]
+
+
+def test_story_model_error_code_accepts_apierror_code_and_response_status():
+    assert gw._story_model_error_code(
+        _FakeGeminiError(503)
+    ) == 503
+
+    response_error = RuntimeError(
+        "response error"
+    )
+    response_error.response = SimpleNamespace(
+        status_code=502,
+    )
+
+    assert gw._story_model_error_code(
+        response_error
+    ) == 502
 
 
 def test_audit_story_does_not_fallback_on_nonretryable_error(monkeypatch):
